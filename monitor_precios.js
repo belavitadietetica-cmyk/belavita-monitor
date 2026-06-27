@@ -1,12 +1,12 @@
 // ═══════════════════════════════════════════════════════
 // BELAVITA OPS · Agente de monitoreo de precios
-// El Sembrador (con login), Moly Market, Bernal
+// Usa Puppeteer (navegador real) para evitar bloqueos
 // ═══════════════════════════════════════════════════════
 
 const { createClient } = require('@supabase/supabase-js');
+const puppeteer = require('puppeteer');
 
 const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
-
 const SEMBRADOR_USER = process.env.SEMBRADOR_USER;
 const SEMBRADOR_PASS = process.env.SEMBRADOR_PASS;
 
@@ -14,214 +14,140 @@ const SEMBRADOR_PASS = process.env.SEMBRADOR_PASS;
 // PRODUCTOS A MONITOREAR
 // ═══════════════════════════════════════════════════════
 const PRODUCTOS_SEMBRADOR = [
-  { nombre_db: 'Almendras Non Pareil',   slug: 'almendra-non-pareil-27-30-importada' },
-  { nombre_db: 'Nuez Mariposa',          slug: 'nuez-mariposa-extra-light' },
-  { nombre_db: 'Chía',                   slug: 'chia-semilla-importada-aa' },
-  { nombre_db: 'Harina de Coco',         slug: 'harina-de-coco-organica' },
-  { nombre_db: 'Harina de Arroz',        slug: 'harina-de-arroz-fino' },
-  { nombre_db: 'Psyllium',               slug: 'psyllium-semilla-de-platago' },
-  { nombre_db: 'Quinoa Nacional',        slug: 'quinoa-nacional-extra' },
-  { nombre_db: 'Lino Marrón',            slug: 'semilla-de-lino-marron' },
-  { nombre_db: 'Girasol',               slug: 'semilla-girasol-pelado-aa' },
-  { nombre_db: 'Sésamo Blanco',          slug: 'sesamo-blanco-natural-aa' },
-  { nombre_db: 'Manzanilla',             slug: 'manzanilla-flor' },
-  { nombre_db: 'Pasas Negras Jumbo',     slug: 'pasa-uva-morocha-flame' },
-  { nombre_db: 'Harina Integral',        slug: 'harina-integral-fina' },
-  { nombre_db: 'Amaranto',              slug: 'amaranto-en-grano' },
-  { nombre_db: 'Mijo Pelado',           slug: 'mijo-pelado' },
-  { nombre_db: 'Harina de Soja',        slug: 'harina-de-soja-desgrasada' },
-  { nombre_db: 'Harina de Centeno',     slug: 'harina-de-centeno' },
-  { nombre_db: 'Harina de Arveja',      slug: 'harina-de-arveja' },
+  { nombre_db: 'Almendras Non Pareil',          slug: 'almendra-non-pareil-27-30-importada' },
+  { nombre_db: 'Nuez Mariposa',                 slug: 'nuez-mariposa-extra-light' },
+  { nombre_db: 'Chía',                          slug: 'chia-semilla-importada-aa' },
+  { nombre_db: 'Harina de Coco',                slug: 'harina-de-coco-organica' },
+  { nombre_db: 'Harina de Arroz',               slug: 'harina-de-arroz-fino' },
+  { nombre_db: 'Psyllium',                      slug: 'psyllium-semilla-de-platago' },
+  { nombre_db: 'Quinoa Nacional',               slug: 'quinoa-nacional-extra' },
+  { nombre_db: 'Lino Marrón',                   slug: 'semilla-de-lino-marron' },
+  { nombre_db: 'Girasol',                       slug: 'semilla-girasol-pelado-aa' },
+  { nombre_db: 'Sésamo Blanco',                 slug: 'sesamo-blanco-natural-aa' },
+  { nombre_db: 'Manzanilla',                    slug: 'manzanilla-flor' },
+  { nombre_db: 'Pasas Negras Jumbo',            slug: 'pasa-uva-morocha-flame' },
+  { nombre_db: 'Harina Integral',               slug: 'harina-integral-fina' },
+  { nombre_db: 'Amaranto',                      slug: 'amaranto-en-grano' },
+  { nombre_db: 'Mijo Pelado',                   slug: 'mijo-pelado' },
+  { nombre_db: 'Harina de Soja',                slug: 'harina-de-soja-desgrasada' },
+  { nombre_db: 'Harina de Centeno',             slug: 'harina-de-centeno' },
+  { nombre_db: 'Harina de Arveja',              slug: 'harina-de-arveja' },
+  { nombre_db: 'Pasas Rubias',                  slug: 'pasa-uva-rubia-thompson' },
+  { nombre_db: 'Arándanos',                     slug: 'arandano-rojo-deshidratado' },
+  { nombre_db: 'Maní Tostado Con Sal',          slug: 'mani-tostado-con-sal' },
+  { nombre_db: 'Maní Tostado Sin Sal',          slug: 'mani-tostado-sin-sal' },
+  { nombre_db: 'Sésamo Integral',               slug: 'sesamo-integral' },
+  { nombre_db: 'Sésamo Negro',                  slug: 'sesamo-negro' },
+  { nombre_db: 'Cus Cus',                       slug: 'cus-cus-semola-de-trigo' },
+  { nombre_db: 'Amaranto',                      slug: 'amaranto-en-grano' },
+  { nombre_db: 'Apio (Semillas)',               slug: 'semilla-de-apio' },
+  { nombre_db: 'Hinojo (Semillas)',             slug: 'semilla-de-hinojo' },
 ];
 
 const PRODUCTOS_MOLY = [
-  { nombre_db: 'Mix Clásico',                  url: 'https://www.molymarket.com.ar/producto/mix-clasico/' },
-  { nombre_db: 'Mix Tropical',                 url: 'https://www.molymarket.com.ar/producto/mix-tropical/' },
-  { nombre_db: 'Mix Premium (Mix Patagónico)', url: 'https://www.molymarket.com.ar/producto/mix-patagonico/' },
-  { nombre_db: 'Mix Sin Pasas',                url: 'https://www.molymarket.com.ar/producto/mix-sin-pasas/' },
-  { nombre_db: 'Mix Cervecero',                url: 'https://www.molymarket.com.ar/producto/mix-cervecero/' },
-  { nombre_db: 'Maní Crudo',                   url: 'https://www.molymarket.com.ar/producto/mani-crudo/' },
-  { nombre_db: 'Amapola',                      url: 'https://www.molymarket.com.ar/producto/semilla-de-amapola/' },
-  { nombre_db: 'Harina de Algarroba',          url: 'https://www.molymarket.com.ar/producto/harina-de-algarroba/' },
-  { nombre_db: 'Harina de Chía',               url: 'https://www.molymarket.com.ar/producto/harina-de-chia/' },
-  { nombre_db: 'Harina de Avena',              url: 'https://www.molymarket.com.ar/producto/harina-de-avena/' },
-  { nombre_db: 'Chips Banana',                 url: 'https://www.molymarket.com.ar/producto/chips-de-banana/' },
+  { nombre_db: 'Mix Clásico',                   path: '/producto/mix-clasico/' },
+  { nombre_db: 'Mix Tropical',                  path: '/producto/mix-tropical/' },
+  { nombre_db: 'Mix Premium (Mix Patagónico)',   path: '/producto/mix-patagonico/' },
+  { nombre_db: 'Mix Sin Pasas',                 path: '/producto/mix-sin-pasas/' },
+  { nombre_db: 'Mix Cervecero',                 path: '/producto/mix-cervecero/' },
+  { nombre_db: 'Maní Crudo',                    path: '/producto/mani-crudo/' },
+  { nombre_db: 'Amapola',                       path: '/producto/semilla-de-amapola/' },
+  { nombre_db: 'Harina de Algarroba',           path: '/producto/harina-de-algarroba/' },
+  { nombre_db: 'Harina de Chía',                path: '/producto/harina-de-chia/' },
+  { nombre_db: 'Harina de Avena',               path: '/producto/harina-de-avena/' },
+  { nombre_db: 'Chips Banana',                  path: '/producto/chips-de-banana/' },
+  { nombre_db: 'Harina Integral',               path: '/producto/harina-integral/' },
 ];
 
 const PRODUCTOS_BERNAL = [
-  { nombre_db: 'Dátiles Sin Carozo',      buscar: 'DATIL' },
-  { nombre_db: 'Zapallo (Semillas)',       buscar: 'ZAPALLO' },
-  { nombre_db: 'Pistachos Con Cáscara',   buscar: 'PISTACHO' },
-  { nombre_db: 'Avellanas Peladas',        buscar: 'AVELLANA' },
-  { nombre_db: 'Pasas Rubias',             buscar: 'PASA RUBIA' },
-  { nombre_db: 'Arándanos',               buscar: 'ARANDANO' },
+  { nombre_db: 'Dátiles Sin Carozo',            buscar: 'DATIL' },
+  { nombre_db: 'Zapallo (Semillas)',             buscar: 'SEMILLA DE ZAPALLO' },
+  { nombre_db: 'Pistachos Con Cáscara',         buscar: 'PISTACHO' },
+  { nombre_db: 'Avellanas Peladas',             buscar: 'AVELLANA PELADA' },
+  { nombre_db: 'Pasas Rubias',                  buscar: 'PASA RUBIA' },
+  { nombre_db: 'Arándanos',                     buscar: 'ARANDANO' },
 ];
 
 // ═══════════════════════════════════════════════════════
-// LOGIN EN EL SEMBRADOR (WooCommerce)
+// EXTRAER PRECIO DEL HTML DE WOOCOMMERCE
 // ═══════════════════════════════════════════════════════
-async function loginSembrador() {
-  console.log('  🔐 Iniciando login en El Sembrador...');
-  try {
-    // 1. Obtener nonce de la página de login
-    const loginPage = await fetch('https://el-sembrador.com.ar/mi-cuenta/', {
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-      signal: AbortSignal.timeout(15000)
-    });
-    const loginHtml = await loginPage.text();
-
-    // Extraer nonce de WooCommerce
-    const nonceMatch = loginHtml.match(/name="woocommerce-login-nonce"\s+value="([^"]+)"/);
-    const nonce = nonceMatch ? nonceMatch[1] : '';
-
-    // 2. Hacer POST de login
-    const formData = new URLSearchParams({
-      username: SEMBRADOR_USER,
-      password: SEMBRADOR_PASS,
-      'woocommerce-login-nonce': nonce,
-      _wp_http_referer: '/mi-cuenta/',
-      login: 'Acceder',
-    });
-
-    const loginRes = await fetch('https://el-sembrador.com.ar/mi-cuenta/', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Referer': 'https://el-sembrador.com.ar/mi-cuenta/',
-      },
-      body: formData.toString(),
-      redirect: 'manual',
-      signal: AbortSignal.timeout(15000)
-    });
-
-    // Obtener cookies de sesión
-    const cookies = loginRes.headers.get('set-cookie') || '';
-    const cookieHeader = cookies.split(',').map(c => c.split(';')[0]).join('; ');
-
-    if (cookieHeader && cookieHeader.includes('wordpress_logged_in')) {
-      console.log('  ✓ Login exitoso en El Sembrador');
-    } else {
-      console.log('  ⚠ Login puede no haber funcionado — continuando igual');
-    }
-    return cookieHeader;
-  } catch(e) {
-    console.error('  ⚠ Error en login:', e.message);
-    return '';
+function extraerPrecioWoo(html) {
+  // Precio de oferta (dentro de <ins>)
+  let m = html.match(/<ins[\s\S]*?woocommerce-Price-amount[\s\S]*?<bdi>([\d.,\s]+)<\/bdi>/i);
+  if (m) {
+    const p = parseFloat(m[1].replace(/\./g,'').replace(',','.').replace(/\s/g,''));
+    if (p > 100) return p;
   }
+  // Precio normal
+  m = html.match(/woocommerce-Price-amount amount[^>]*>[^<]*<bdi>([\d.,\s]+)<\/bdi>/i);
+  if (m) {
+    const p = parseFloat(m[1].replace(/\./g,'').replace(',','.').replace(/\s/g,''));
+    if (p > 100) return p;
+  }
+  // JSON-LD
+  m = html.match(/"price"\s*:\s*"?([\d.]+)"?/);
+  if (m) {
+    const p = parseFloat(m[1]);
+    if (p > 100) return p;
+  }
+  // Formato $X.-
+  const matches = [...html.matchAll(/\$\s*([\d.,]+)\.-/g)];
+  for (const match of matches) {
+    const p = parseFloat(match[1].replace(/\./g,'').replace(',','.'));
+    if (p > 100 && p < 10000000) return p;
+  }
+  return null;
 }
 
 // ═══════════════════════════════════════════════════════
-// FETCH PRECIO DE PRODUCTO WOOCOMMERCE
+// GUARDAR PRECIO Y GENERAR ALERTA
 // ═══════════════════════════════════════════════════════
-async function fetchPrecioWoo(url, cookies = '') {
-  try {
-    const res = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        ...(cookies ? { 'Cookie': cookies } : {}),
-      },
-      signal: AbortSignal.timeout(15000)
-    });
-    const html = await res.text();
+async function procesarPrecio(prod, proveedor_id, precio_nuevo) {
+  if (!precio_nuevo || !prod?.id) return;
 
-    // Buscar precio en WooCommerce — primero precio de oferta, luego precio normal
-    // Formato: <ins><span class="woocommerce-Price-amount">$ 18.495.-</span></ins>
-    const patterns = [
-      /<ins[^>]*>[\s\S]*?woocommerce-Price-amount[^>]*>([\d.,\s]+)<\/bdi>/i,
-      /woocommerce-Price-amount amount"[^>]*>.*?\$([\d.,\s]+)/i,
-      /"price"\s*:\s*"([\d.]+)"/,
-      /\$\s*([\d.,]+)\.-/,
-    ];
-
-    for (const pat of patterns) {
-      const m = html.match(pat);
-      if (m) {
-        const raw = m[1].replace(/\./g, '').replace(',', '.').replace(/\s/g, '');
-        const precio = parseFloat(raw);
-        if (precio > 100 && precio < 10000000) return precio;
-      }
-    }
-
-    // Buscar en JSON-LD (datos estructurados)
-    const jsonMatch = html.match(/"offers"[\s\S]*?"price"\s*:\s*"?([\d.]+)"?/);
-    if (jsonMatch) {
-      const precio = parseFloat(jsonMatch[1]);
-      if (precio > 100) return precio;
-    }
-
-    return null;
-  } catch(e) {
-    console.error(`  ⚠ Error fetching ${url}:`, e.message);
-    return null;
-  }
-}
-
-// ═══════════════════════════════════════════════════════
-// PROCESAR Y GUARDAR PRECIO
-// ═══════════════════════════════════════════════════════
-async function procesarPrecio(producto, proveedor_id, precio_nuevo) {
-  if (!precio_nuevo || !producto?.id) return;
-
-  // Obtener último precio guardado
   const { data: ultimo } = await sb.schema('ops').from('precios_historico')
-    .select('precio_sin_iva, fecha_registro')
-    .eq('producto_id', producto.id)
-    .eq('proveedor_id', proveedor_id)
-    .order('fecha_registro', { ascending: false })
-    .limit(1).maybeSingle();
+    .select('precio_sin_iva').eq('producto_id', prod.id).eq('proveedor_id', proveedor_id)
+    .order('fecha_registro', { ascending: false }).limit(1).maybeSingle();
 
   const precio_anterior = ultimo?.precio_sin_iva || null;
-  const ahorro = precio_anterior ? precio_anterior - precio_nuevo : 0;
 
-  // Guardar nuevo precio
   await sb.schema('ops').from('precios_historico').insert({
-    producto_id: producto.id,
-    proveedor_id,
-    precio_sin_iva: precio_nuevo,
-    fuente: 'agente',
-    ahorro_vs_anterior: ahorro,
+    producto_id: prod.id, proveedor_id, precio_sin_iva: precio_nuevo,
+    fuente: 'agente', ahorro_vs_anterior: precio_anterior ? precio_anterior - precio_nuevo : 0,
   });
 
   if (!precio_anterior) {
-    console.log(`  ✓ ${producto.nombre}: $${precio_nuevo.toLocaleString('es-AR')} (primer registro)`);
+    console.log(`  ✓ ${prod.nombre}: $${Math.round(precio_nuevo).toLocaleString('es-AR')} (primer registro)`);
     return;
   }
 
-  const variacion_pct = ((precio_nuevo - precio_anterior) / precio_anterior) * 100;
-
-  if (Math.abs(variacion_pct) < 1) {
-    console.log(`  = ${producto.nombre}: $${precio_nuevo.toLocaleString('es-AR')} (sin cambio)`);
+  const pct = ((precio_nuevo - precio_anterior) / precio_anterior) * 100;
+  if (Math.abs(pct) < 1) {
+    console.log(`  = ${prod.nombre}: $${Math.round(precio_nuevo).toLocaleString('es-AR')} (sin cambio)`);
     return;
   }
 
   const sube = precio_nuevo > precio_anterior;
-  const icon = sube ? '📈' : '📉';
-  const tipo = sube ? 'precio_aumento' : 'proveedor_mejor';
-  const mensaje = `${icon} ${producto.nombre} ${sube ? 'subió' : 'bajó'} ${Math.abs(variacion_pct).toFixed(1)}% — de $${Math.round(precio_anterior).toLocaleString('es-AR')} a $${Math.round(precio_nuevo).toLocaleString('es-AR')}`;
+  const msg = `${sube?'📈':'📉'} ${prod.nombre} ${sube?'subió':'bajó'} ${Math.abs(pct).toFixed(1)}% — de $${Math.round(precio_anterior).toLocaleString('es-AR')} a $${Math.round(precio_nuevo).toLocaleString('es-AR')}`;
+  console.log(`  ${msg}`);
 
-  console.log(`  ${mensaje}`);
-
-  // Generar alerta si variación > 3%
-  if (Math.abs(variacion_pct) >= 3) {
+  if (Math.abs(pct) >= 3) {
     await sb.schema('ops').from('alertas').insert({
-      producto_id: producto.id,
-      tipo,
-      mensaje,
-      datos: { precio_anterior, precio_nuevo, variacion_pct: variacion_pct.toFixed(1) },
+      producto_id: prod.id, tipo: sube?'precio_aumento':'proveedor_mejor', mensaje: msg,
+      datos: { precio_anterior, precio_nuevo, variacion_pct: pct.toFixed(1) },
     });
   }
 }
 
 // ═══════════════════════════════════════════════════════
-// FUNCIÓN PRINCIPAL EXPORTABLE
+// FUNCIÓN PRINCIPAL
 // ═══════════════════════════════════════════════════════
 async function monitorear() {
   console.log(`\n🔍 BELAVITA OPS · Monitoreo de precios`);
   console.log(`📅 ${new Date().toLocaleString('es-AR', { timeZone: 'America/Argentina/Mendoza' })}`);
   console.log('═'.repeat(55));
 
-  // Cargar IDs de proveedores y productos
+  // Cargar proveedores y productos de Supabase
   const { data: provs } = await sb.schema('ops').from('proveedores').select('id, nombre');
   const provMap = {};
   provs?.forEach(p => { provMap[p.nombre] = p.id; });
@@ -240,79 +166,121 @@ async function monitorear() {
   }
 
   let revisados = 0;
+  let browser = null;
 
-  // ── EL SEMBRADOR (con login) ──
-  console.log('\n📦 EL SEMBRADOR');
-  const cookies = await loginSembrador();
-  await new Promise(r => setTimeout(r, 2000));
-
-  for (const item of PRODUCTOS_SEMBRADOR) {
-    const prod = findProd(item.nombre_db);
-    if (!prod) { console.log(`  ? ${item.nombre_db} → no encontrado en DB`); continue; }
-    const url = `https://el-sembrador.com.ar/producto/${item.slug}/`;
-    const precio = await fetchPrecioWoo(url, cookies);
-    if (precio) {
-      await procesarPrecio(prod, provMap['El Sembrador'], precio);
-      revisados++;
-    } else {
-      console.log(`  ⚠ ${item.nombre_db} → precio no detectado`);
-    }
-    await new Promise(r => setTimeout(r, 1200));
-  }
-
-  // ── MOLY MARKET ──
-  console.log('\n📦 MOLY MARKET');
-  for (const item of PRODUCTOS_MOLY) {
-    const prod = findProd(item.nombre_db);
-    if (!prod) { console.log(`  ? ${item.nombre_db} → no encontrado en DB`); continue; }
-    const precio = await fetchPrecioWoo(item.url);
-    if (precio) {
-      await procesarPrecio(prod, provMap['Moly Market'], precio);
-      revisados++;
-    } else {
-      console.log(`  ⚠ ${item.nombre_db} → precio no detectado`);
-    }
-    await new Promise(r => setTimeout(r, 1200));
-  }
-
-  // ── BERNAL ──
-  console.log('\n📦 BERNAL');
-  let bernalHtml = null;
   try {
-    const res = await fetch('https://gglobal.net.ar/bernal/?cliente', {
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-      signal: AbortSignal.timeout(20000)
+    // Iniciar Puppeteer
+    console.log('\n🌐 Iniciando navegador...');
+    browser = await puppeteer.launch({
+      headless: 'new',
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--window-size=1280,800',
+      ]
     });
-    bernalHtml = await res.text();
-    console.log('  ✓ Página de Bernal cargada');
-  } catch(e) {
-    console.log('  ⚠ No se pudo cargar Bernal:', e.message);
-  }
 
-  if (bernalHtml) {
-    for (const item of PRODUCTOS_BERNAL) {
+    const page = await browser.newPage();
+    await page.setViewport({ width: 1280, height: 800 });
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+    await page.setExtraHTTPHeaders({ 'Accept-Language': 'es-AR,es;q=0.9' });
+
+    // ── EL SEMBRADOR · LOGIN ──
+    console.log('\n📦 EL SEMBRADOR · Iniciando sesión...');
+    try {
+      await page.goto('https://el-sembrador.com.ar/mi-cuenta/', { waitUntil: 'networkidle2', timeout: 30000 });
+      await page.type('#username', SEMBRADOR_USER, { delay: 50 });
+      await page.type('#password', SEMBRADOR_PASS, { delay: 50 });
+      await Promise.all([
+        page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 20000 }),
+        page.click('[name="login"]'),
+      ]);
+      const url = page.url();
+      if (url.includes('mi-cuenta') && !url.includes('login')) {
+        console.log('  ✓ Login exitoso');
+      } else {
+        console.log('  ⚠ Login puede no haber funcionado');
+      }
+    } catch(e) {
+      console.log('  ⚠ Error en login:', e.message);
+    }
+
+    // Scrape productos El Sembrador
+    for (const item of PRODUCTOS_SEMBRADOR) {
       const prod = findProd(item.nombre_db);
       if (!prod) continue;
-      const idx = bernalHtml.toUpperCase().indexOf(item.buscar.toUpperCase());
-      if (idx === -1) { console.log(`  ? ${item.nombre_db} → no encontrado en página`); continue; }
-      const frag = bernalHtml.substring(idx, idx + 400);
-      const m = frag.match(/\$\s*([\d.,]+)/);
-      if (m) {
-        const precio = parseFloat(m[1].replace(/\./g, '').replace(',', '.'));
-        if (precio > 100) {
-          await procesarPrecio(prod, provMap['Bernal'], precio);
+      try {
+        const url = `https://el-sembrador.com.ar/producto/${item.slug}/`;
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
+        const html = await page.content();
+        const precio = extraerPrecioWoo(html);
+        if (precio) {
+          await procesarPrecio(prod, provMap['El Sembrador'], precio);
           revisados++;
+        } else {
+          console.log(`  ⚠ ${item.nombre_db} → precio no encontrado`);
+        }
+      } catch(e) {
+        console.log(`  ⚠ ${item.nombre_db} → error: ${e.message}`);
+      }
+      await new Promise(r => setTimeout(r, 800));
+    }
+
+    // ── MOLY MARKET ──
+    console.log('\n📦 MOLY MARKET');
+    for (const item of PRODUCTOS_MOLY) {
+      const prod = findProd(item.nombre_db);
+      if (!prod) continue;
+      try {
+        await page.goto(`https://www.molymarket.com.ar${item.path}`, { waitUntil: 'domcontentloaded', timeout: 15000 });
+        const html = await page.content();
+        const precio = extraerPrecioWoo(html);
+        if (precio) {
+          await procesarPrecio(prod, provMap['Moly Market'], precio);
+          revisados++;
+        } else {
+          console.log(`  ⚠ ${item.nombre_db} → precio no encontrado`);
+        }
+      } catch(e) {
+        console.log(`  ⚠ ${item.nombre_db} → error: ${e.message}`);
+      }
+      await new Promise(r => setTimeout(r, 800));
+    }
+
+    // ── BERNAL ──
+    console.log('\n📦 BERNAL');
+    try {
+      await page.goto('https://gglobal.net.ar/bernal/?cliente', { waitUntil: 'domcontentloaded', timeout: 20000 });
+      const html = await page.content();
+      console.log(`  ✓ Página cargada (${html.length} chars)`);
+
+      for (const item of PRODUCTOS_BERNAL) {
+        const prod = findProd(item.nombre_db);
+        if (!prod) continue;
+        const idx = html.toUpperCase().indexOf(item.buscar.toUpperCase());
+        if (idx === -1) { console.log(`  ? ${item.nombre_db} → no encontrado`); continue; }
+        const frag = html.substring(idx, idx + 500);
+        const m = frag.match(/\$\s*([\d.,]+)/);
+        if (m) {
+          const precio = parseFloat(m[1].replace(/\./g,'').replace(',','.'));
+          if (precio > 100) { await procesarPrecio(prod, provMap['Bernal'], precio); revisados++; }
         }
       }
-      await new Promise(r => setTimeout(r, 500));
+    } catch(e) {
+      console.log('  ⚠ Error Bernal:', e.message);
     }
+
+  } finally {
+    if (browser) await browser.close();
   }
 
   // Registrar ejecución
   await sb.schema('ops').from('monitoreo_precios').insert({
     proveedor_id: provMap['El Sembrador'],
     productos_revisados: revisados,
-    alerta_generada: true,
+    alerta_generada: revisados > 0,
     fecha_ejecucion: new Date().toISOString(),
   });
 
@@ -321,8 +289,4 @@ async function monitorear() {
 }
 
 module.exports = { monitorear };
-
-// Si se ejecuta directamente
-if (require.main === module) {
-  monitorear().catch(console.error);
-}
+if (require.main === module) monitorear().catch(console.error);

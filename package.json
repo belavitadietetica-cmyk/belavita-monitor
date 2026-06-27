@@ -1,14 +1,14 @@
 {
   "name": "belavita-monitor",
   "version": "1.0.0",
-  "description": "Agente de monitoreo de precios de proveedores - Belavita Ops",
-  "main": "monitor_precios.js",
+  "description": "Agente de monitoreo de precios - Belavita Ops",
+  "main": "monitor_cron.js",
   "scripts": {
-    "start": "node monitor_precios.js",
-    "monitor": "node monitor_precios.js"
+    "start": "node monitor_cron.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.0.0",
-    "node-cron": "^3.0.0"
+    "node-cron": "^3.0.0",
+    "puppeteer": "^21.0.0"
   }
 }

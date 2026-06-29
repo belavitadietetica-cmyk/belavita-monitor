@@ -491,11 +491,12 @@ async function monitorear() {
     const reporte = await generarReporte(resultadosPorProducto, ofertas, ultimosPrecios);
     console.log('\n' + reporte);
 
-    // Guardar reporte como alerta para Lucas (siempre, aunque sea parcial)
-    const prodAlmendra = findProd('Almendras Non Pareil');
+    console.log('  📋 Reporte generado:', reporte ? reporte.substring(0, 200) : 'VACÍO');
+  // Guardar reporte como alerta para Lucas (siempre, aunque sea parcial)
     const reporteFinal = reporte || '⚠ El análisis no encontró datos. Verificar conexión con El Sembrador.';
-    await sb.schema('ops').from('alertas').insert({
-      producto_id: prodAlmendra?.id || null,
+    
+    // Insert sin producto_id para evitar errores de FK
+    const insertResult = await sb.schema('ops').from('alertas').insert({
       tipo: 'analisis_proveedor',
       mensaje: reporteFinal,
       datos: {
@@ -505,7 +506,12 @@ async function monitorear() {
         fecha: new Date().toISOString(),
       },
     });
-    console.log('  ✓ Reporte guardado en alertas para Lucas');
+    
+    if (insertResult.error) {
+      console.log('  ❌ Error guardando alerta:', JSON.stringify(insertResult.error));
+    } else {
+      console.log('  ✓ Reporte guardado en alertas para Lucas');
+    }
 
   } catch(eGeneral) {
     console.log('❌ Error general en monitoreo:', eGeneral.message);

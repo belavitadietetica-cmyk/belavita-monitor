@@ -13,12 +13,18 @@ const SEMBRADOR_PASS = process.env.SEMBRADOR_PASS;
 const delay = ms => new Promise(r => setTimeout(r, ms));
 
 const BUSQUEDAS = [
-  { buscar: 'almendra', nombre_db: 'Almendras Non Pareil', enfocar: ['NON PAREIL'], cantidad_kg: 10 },
-  { buscar: 'nuez',     nombre_db: 'Nuez Mariposa',        enfocar: ['MARIPOSA EXTRA LIGHT', 'MARIPOSA LIGHT', 'CUARTO LIGHT', 'CUARTO EXTRA LIGHT'], cantidad_kg: 10 },
-  { buscar: 'chia',     nombre_db: 'Chía',                 enfocar: ['CHIA AA', 'SEMILLA CHIA'], cantidad_kg: 25 },
-  { buscar: 'harina coco', nombre_db: 'Harina de Coco',   enfocar: ['HARINA COCO', 'HARINA DE COCO'], cantidad_kg: 10 },
-  { buscar: 'psyllium', nombre_db: 'Psyllium',             enfocar: ['PSYLLIUM'], cantidad_kg: 10 },
-  { buscar: 'manzanilla', nombre_db: 'Manzanilla',         enfocar: ['MANZANILLA'], cantidad_kg: 2 },
+  { buscar: 'almendra', nombre_db: 'Almendras Non Pareil', enfocar: ['NON PAREIL'], cantidad_kg: 10,
+    url: 'https://el-sembrador.com.ar/producto-categoria/frutos-secos-y-desecados/' },
+  { buscar: 'nuez mariposa', nombre_db: 'Nuez Mariposa', enfocar: ['MARIPOSA EXTRA LIGHT', 'MARIPOSA LIGHT', 'CUARTO LIGHT', 'CUARTO EXTRA LIGHT'], cantidad_kg: 10,
+    url: 'https://el-sembrador.com.ar/producto-categoria/frutos-secos-y-desecados/' },
+  { buscar: 'chia', nombre_db: 'Chía', enfocar: ['CHIA AA', 'SEMILLA CHIA'], cantidad_kg: 25,
+    url: 'https://el-sembrador.com.ar/producto-categoria/semillas/' },
+  { buscar: 'harina coco', nombre_db: 'Harina de Coco', enfocar: ['HARINA COCO', 'HARINA DE COCO'], cantidad_kg: 10,
+    url: 'https://el-sembrador.com.ar/producto-categoria/harinas/' },
+  { buscar: 'psyllium', nombre_db: 'Psyllium', enfocar: ['PSYLLIUM'], cantidad_kg: 10,
+    url: 'https://el-sembrador.com.ar/producto-categoria/harinas/' },
+  { buscar: 'manzanilla', nombre_db: 'Manzanilla', enfocar: ['MANZANILLA'], cantidad_kg: 2,
+    url: 'https://el-sembrador.com.ar/producto-categoria/hierbas/' },
 ];
 
 async function monitorear() {
@@ -126,38 +132,25 @@ async function monitorear() {
 
     // ── CARGAR TIENDA UNA SOLA VEZ ──
     console.log('  📋 Cargando tienda mayorista...');
-    // Cargar tienda con todos los productos - esperar que cargue el JS
-    await page.goto('https://el-sembrador.com.ar/tienda/?per_page=100', { waitUntil: 'networkidle2', timeout: 40000 });
-    await delay(4000);
-    
-    // Scroll para activar lazy loading
-    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-    await delay(2000);
-    await page.evaluate(() => window.scrollTo(0, 0));
-    await delay(1000);
-    
-    const bodyTexto = await page.evaluate(() => document.body?.innerText || '');
-    console.log(`  → Tienda cargada: ${bodyTexto.length} chars`);
-    
-    // Verificar que cargó bien
-    const tieneAlmendra = bodyTexto.toUpperCase().includes('ALMENDRA');
-    const tieneNuez = bodyTexto.toUpperCase().includes('NUEZ MARIPOSA');
-    const tieneChia = bodyTexto.toUpperCase().includes('CHIA');
-    console.log(`  → Verificación: almendra=${tieneAlmendra} nuez=${tieneNuez} chia=${tieneChia}`);
+    // Cada producto tiene su propia URL de categoría
+    // Se carga por separado en el loop
 
     // ── BUSCAR CADA PRODUCTO EN EL TEXTO ──
     for (const config of BUSQUEDAS) {
       console.log(`  🔍 Buscando: "${config.buscar}"`);
       try {
-        // No recargar la página - buscar en el texto ya cargado
-        const url = ``;  // no se usa
+        // Cargar la categoría específica del producto
+        await page.goto(config.url, { waitUntil: 'domcontentloaded', timeout: 25000 });
+        await delay(3000);
+        await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+        await delay(1500);
 
         // Extraer productos y precios
         // Extraer productos del texto del body directamente
         // El Sembrador muestra los productos como "NOMBRE $ PRECIO.- OFERTA $ PRECIO_OFERTA.-"
-        const productos = await page.evaluate((buscar, enfocar, cuerpo) => {
+        const productos = await page.evaluate((buscar, enfocar) => {
           const items = [];
-          const txt = cuerpo || '';
+          const txt = document.body?.innerText || '';
           const lines = txt.split('\n').map(l => l.trim()).filter(l => l.length > 3);
           
           for (let i = 0; i < lines.length; i++) {
@@ -199,7 +192,7 @@ async function monitorear() {
             });
           }
           return items;
-        }, config.buscar, config.enfocar, bodyTexto);
+        }, config.buscar, config.enfocar);
 
         console.log(`  → ${productos.length} productos encontrados`);
 

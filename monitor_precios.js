@@ -135,32 +135,27 @@ async function leerPrecioProducto(page, url, cantidad_kg) {
       // Detectar oferta
       const tieneOferta = txt.includes('OFERTA') || !!document.querySelector('.woocommerce-Price-amount ins, ins .amount');
 
-      // Los precios del producto tienen formato "$ X.XXX." con punto al final
-      // Los precios del carrito NO tienen ese punto final
-      // Estrategia: buscar primero precios con punto final, luego fallback
+      // Estructura de la página: "NOMBRE PRODUCTO $ PRECIO_NORMAL [precio_oferta]"
+      // El primer precio después del h1 es el precio base
+      // Si hay oferta, aparece un segundo precio más bajo
 
-      // 1. Precios con punto al final — son los precios reales del producto
-      const preciosConPunto = [...txt.matchAll(/\$\s*([\d.]+)\./g)]
-        .map(m => parseFloat(m[1].replace(/\./g,'')))
-        .filter(p => p > 1000 && p < 5000000);
+      // Buscar todos los precios en el área del producto (>$1000)
+      const todosPrecios = [...txt.matchAll(/\$\s*([\d.]+)/g)]
+        .map(m => ({ val: parseFloat(m[1].replace(/\./g,'')), raw: m[1] }))
+        .filter(p => p.val > 1000 && p.val < 5000000);
 
-      // 2. Si no hay con punto, usar todos los precios del área del producto
-      const todosPreciosMatch = [...txt.matchAll(/\$\s*([\d.]+)/g)]
-        .map(m => parseFloat(m[1].replace(/\./g,'')))
-        .filter(p => p > 5000 && p < 5000000); // mínimo $5000 para excluir precios/kg pequeños
+      if (!todosPrecios.length) return null;
 
-      const precios = preciosConPunto.length > 0 ? preciosConPunto : todosPreciosMatch;
-
-      if (!precios.length) return null;
-
-      // El precio normal es el más alto, el de oferta el más bajo (si hay 2 distintos)
-      const precioMax = Math.max(...precios);
-      const precioMin = Math.min(...precios);
-      const hayDosPrecios = precioMax !== precioMin && precioMax / precioMin > 1.02;
-
-      const precioNormal = precioMax;
-      const precioBase = hayDosPrecios ? precioMin : precioMax;
-      const precioOferta = tieneOferta && hayDosPrecios ? precioMin : null;
+      // El precio normal es el PRIMERO que aparece
+      const precioNormal = todosPrecios[0].val;
+      
+      // Si hay oferta y un segundo precio distinto, ese es el precio con descuento
+      const segundoPrecio = todosPrecios.find(p => Math.abs(p.val - precioNormal) > 100);
+      const precioOferta = tieneOferta && segundoPrecio && segundoPrecio.val < precioNormal 
+        ? segundoPrecio.val : null;
+      
+      // El precio efectivo: oferta si existe, sino el normal
+      const precioBase = precioOferta || precioNormal;
 
       // Precio específico por cantidad — buscar "Xkg" cerca de un precio
       let precioPorKg10 = null;

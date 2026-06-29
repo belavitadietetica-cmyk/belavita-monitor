@@ -158,7 +158,7 @@ async function buscarProducto(page, config) {
   console.log(`\n  🔍 Buscando: "${config.buscar}"`);
 
   // Ir a la tienda mayorista con búsqueda
-  const url = `https://el-sembrador.com.ar/tienda-mayorista/?s=${encodeURIComponent(config.buscar)}&post_type=product`;
+  const url = `https://el-sembrador.com.ar/tienda/?23867_search_1=${encodeURIComponent(config.buscar)}&23867_filtered=true`;
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 });
   await delay(1500);
 
@@ -289,7 +289,7 @@ async function buscarProducto(page, config) {
 async function scrapeOfertasSemana(page) {
   console.log('\n  🏷️ Revisando ofertas de la semana...');
   try {
-    await page.goto('https://el-sembrador.com.ar/tienda-mayorista/', { waitUntil: 'domcontentloaded', timeout: 20000 });
+    await page.goto('https://el-sembrador.com.ar/tienda/', { waitUntil: 'domcontentloaded', timeout: 20000 });
     await delay(2000);
 
     const ofertas = await page.evaluate(() => {

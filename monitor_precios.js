@@ -131,17 +131,32 @@ async function leerPrecioProducto(page, url, cantidad_kg) {
       // Detectar oferta
       const tieneOferta = txt.includes('OFERTA') || !!document.querySelector('.woocommerce-Price-amount ins, ins .amount');
 
-      // Extraer precios del área del producto (mínimo $1000 para evitar cantidades)
-      const preciosMatch = [...txt.matchAll(/\$\s*([\d.]+)/g)];
-      const precios = preciosMatch
+      // Los precios del producto tienen formato "$ X.XXX." con punto al final
+      // Los precios del carrito NO tienen ese punto final
+      // Estrategia: buscar primero precios con punto final, luego fallback
+
+      // 1. Precios con punto al final — son los precios reales del producto
+      const preciosConPunto = [...txt.matchAll(/\$\s*([\d.]+)\./g)]
         .map(m => parseFloat(m[1].replace(/\./g,'')))
-        .filter(p => p > 1000 && p < 10000000);
+        .filter(p => p > 1000 && p < 5000000);
+
+      // 2. Si no hay con punto, usar todos los precios del área del producto
+      const todosPreciosMatch = [...txt.matchAll(/\$\s*([\d.]+)/g)]
+        .map(m => parseFloat(m[1].replace(/\./g,'')))
+        .filter(p => p > 5000 && p < 5000000); // mínimo $5000 para excluir precios/kg pequeños
+
+      const precios = preciosConPunto.length > 0 ? preciosConPunto : todosPreciosMatch;
 
       if (!precios.length) return null;
 
-      const precioBase = Math.min(...precios);
-      const precioNormal = precios.length > 1 ? Math.max(...precios) : precioBase;
-      const precioOferta = tieneOferta && precios.length > 1 ? precioBase : null;
+      // El precio normal es el más alto, el de oferta el más bajo (si hay 2 distintos)
+      const precioMax = Math.max(...precios);
+      const precioMin = Math.min(...precios);
+      const hayDosPrecios = precioMax !== precioMin && precioMax / precioMin > 1.02;
+
+      const precioNormal = precioMax;
+      const precioBase = hayDosPrecios ? precioMin : precioMax;
+      const precioOferta = tieneOferta && hayDosPrecios ? precioMin : null;
 
       // Precio específico por cantidad — buscar "Xkg" cerca de un precio
       let precioPorKg10 = null;

@@ -79,19 +79,64 @@ async function launchBrowser() {
 // ═══════════════════════════════════════════════════════
 async function loginSembrador(page) {
   console.log('  🔐 Logueando en El Sembrador...');
-  await page.goto('https://el-sembrador.com.ar/mi-cuenta/', { waitUntil: 'networkidle2', timeout: 30000 });
-  await page.waitForSelector('#user_login', { timeout: 10000 });
-  await page.click('#user_login', { clickCount: 3 });
-  await page.type('#user_login', SEMBRADOR_USER, { delay: 60 });
-  await page.click('#user_pass', { clickCount: 3 });
-  await page.type('#user_pass', SEMBRADOR_PASS, { delay: 60 });
-  await Promise.all([
-    page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 20000 }),
-    page.click('#wp-submit'),
-  ]);
-  const ok = page.url().includes('mi-cuenta') && !page.url().includes('login');
-  console.log(ok ? '  ✓ Login OK' : '  ⚠ Login puede haber fallado');
-  return ok;
+  try {
+    await page.goto('https://el-sembrador.com.ar/mi-cuenta/', { waitUntil: 'domcontentloaded', timeout: 40000 });
+    await delay(3000);
+
+    // Intentar múltiples selectores posibles para el campo usuario
+    const selectoresUser = ['#user_login', '#username', 'input[name="username"]', 'input[name="log"]', 'input[type="text"]'];
+    const selectoresPass = ['#user_pass', '#password', 'input[name="password"]', 'input[name="pwd"]', 'input[type="password"]'];
+    const selectoresBtn  = ['#wp-submit', 'button[type="submit"]', 'input[type="submit"]', '.woocommerce-Button'];
+
+    let campoUser = null;
+    for (const sel of selectoresUser) {
+      campoUser = await page.$(sel);
+      if (campoUser) { console.log(`  → Campo usuario: ${sel}`); break; }
+    }
+
+    let campoPass = null;
+    for (const sel of selectoresPass) {
+      campoPass = await page.$(sel);
+      if (campoPass) { console.log(`  → Campo contraseña: ${sel}`); break; }
+    }
+
+    if (!campoUser || !campoPass) {
+      // Guardar screenshot para debug
+      console.log('  ⚠ Formulario no encontrado. URL actual:', page.url());
+      console.log('  → Continuando sin login (precios públicos)');
+      return false;
+    }
+
+    await campoUser.click({ clickCount: 3 });
+    await campoUser.type(SEMBRADOR_USER, { delay: 60 });
+    await campoPass.click({ clickCount: 3 });
+    await campoPass.type(SEMBRADOR_PASS, { delay: 60 });
+
+    // Buscar botón de submit
+    let btnSubmit = null;
+    for (const sel of selectoresBtn) {
+      btnSubmit = await page.$(sel);
+      if (btnSubmit) { console.log(`  → Botón login: ${sel}`); break; }
+    }
+
+    if (btnSubmit) {
+      await Promise.all([
+        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 25000 }),
+        btnSubmit.click(),
+      ]);
+    }
+
+    await delay(2000);
+    const urlFinal = page.url();
+    const ok = !urlFinal.includes('login') && (urlFinal.includes('mi-cuenta') || urlFinal.includes('sembrador'));
+    console.log(ok ? `  ✓ Login OK · ${urlFinal}` : `  ⚠ Login incierto · ${urlFinal}`);
+    return ok;
+
+  } catch(e) {
+    console.log('  ⚠ Error en login:', e.message);
+    console.log('  → Continuando sin login');
+    return false;
+  }
 }
 
 // ═══════════════════════════════════════════════════════

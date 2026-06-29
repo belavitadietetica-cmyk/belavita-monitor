@@ -124,56 +124,68 @@ async function monitorear() {
       console.log('  ⚠ Login no completado');
     }
 
-    // ── BUSCAR CADA PRODUCTO ──
+    // ── CARGAR TIENDA UNA SOLA VEZ ──
+    console.log('  📋 Cargando tienda mayorista...');
+    await page.goto('https://el-sembrador.com.ar/tienda/', { waitUntil: 'domcontentloaded', timeout: 20000 });
+    await delay(2000);
+    const bodyTexto = await page.evaluate(() => document.body?.innerText || '');
+    console.log(`  → Tienda cargada: ${bodyTexto.length} chars`);
+
+    // ── BUSCAR CADA PRODUCTO EN EL TEXTO ──
     for (const config of BUSQUEDAS) {
       console.log(`  🔍 Buscando: "${config.buscar}"`);
       try {
-        const url = `https://el-sembrador.com.ar/tienda/?23867_search_1=${config.buscar}&23867_filtered=true`;
-        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 });
-        await delay(1500);
+        // No recargar la página - buscar en el texto ya cargado
+        const url = ``;  // no se usa
 
         // Extraer productos y precios
-        // Debug: ver qué HTML devuelve la búsqueda
-        const htmlDebug = await page.content();
-        const tieneProductos = htmlDebug.includes('woocommerce-loop-product') || htmlDebug.includes('product-title') || htmlDebug.includes('type-product');
-        console.log(`  → HTML recibido: ${htmlDebug.length} chars · tiene productos: ${tieneProductos}`);
-        if (!tieneProductos) {
-          // Mostrar primeros 500 chars del body para ver qué hay
-          const bodyTxt = await page.evaluate(() => document.body?.innerText?.substring(0, 300) || 'sin body');
-          console.log(`  → Body preview: ${bodyTxt.replace(/\n/g,' ')}`);
-        }
-
-        const productos = await page.evaluate((enfocar, cantidad_kg) => {
+        // Extraer productos del texto del body directamente
+        // El Sembrador muestra los productos como "NOMBRE $ PRECIO.- OFERTA $ PRECIO_OFERTA.-"
+        const productos = await page.evaluate((buscar, enfocar, cuerpo) => {
           const items = [];
-          document.querySelectorAll('.product, li.product, .type-product').forEach(el => {
-            const nombre = (el.querySelector('h2, .woocommerce-loop-product__title')?.innerText || '').trim();
-            if (!nombre) return;
-
-            // Precio oferta vs normal
-            const po = el.querySelector('ins .woocommerce-Price-amount bdi, ins .amount bdi');
-            const pn = el.querySelector('.woocommerce-Price-amount bdi, .price .amount bdi');
-            const limpiar = t => {
-              if (!t) return null;
-              const txt = t.innerText || t.textContent || '';
-              const num = parseFloat(txt.replace(/[^0-9,]/g,'').replace(',','.'));
-              return isNaN(num) ? null : num;
-            };
-            const precio_oferta = limpiar(po);
-            const precio_base = limpiar(pn);
-            const precio = precio_oferta || precio_base;
-            if (!precio || precio < 100) return;
-
-            const nombreUp = nombre.toUpperCase();
-            const esEnfocado = enfocar.some(e => nombreUp.includes(e));
-            const link = el.querySelector('a')?.href || '';
-
-            // Mejor precio por cantidad
-            const txt = el.innerText || '';
-            const majMatch = txt.match(/partir de[:\s]*([\d]+)\s*kg/i);
-            items.push({ nombre, precio, precio_oferta, es_enfocado: esEnfocado, link, mejor_kgs: majMatch ? parseInt(majMatch[1]) : null });
-          });
+          const txt = cuerpo || '';
+          const lines = txt.split('\n').map(l => l.trim()).filter(l => l.length > 3);
+          
+          for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const lineUp = line.toUpperCase();
+            
+            // Ver si la línea contiene el término de búsqueda
+            if (!lineUp.includes(buscar.toUpperCase().replace('+', ' '))) continue;
+            
+            // Buscar precio en las siguientes líneas
+            let precio_normal = null;
+            let precio_oferta = null;
+            
+            for (let j = i+1; j < Math.min(i+6, lines.length); j++) {
+              const pline = lines[j];
+              // Formato: "$ 21.035.-" o "$ 18.495.-" o "OFERTA $ 18.495.-"
+              const esOferta = lines[j-1]?.toUpperCase().includes('OFERTA') || pline.toUpperCase().includes('OFERTA');
+              const mPrice = pline.match(/\$\s*([\d.,]+)\.-/);
+              if (mPrice) {
+                const precio = parseFloat(mPrice[1].replace(/\./g,'').replace(',','.'));
+                if (precio > 100) {
+                  if (esOferta) precio_oferta = precio;
+                  else if (!precio_normal) precio_normal = precio;
+                }
+              }
+            }
+            
+            if (!precio_normal && !precio_oferta) continue;
+            
+            const nombreUp = line.toUpperCase();
+            const esEnfocado = enfocar.some(e => nombreUp.includes(e.toUpperCase()));
+            
+            items.push({
+              nombre: line.replace(/\s+/g, ' ').trim(),
+              precio: precio_oferta || precio_normal,
+              precio_oferta,
+              precio_normal,
+              es_enfocado: esEnfocado,
+            });
+          }
           return items;
-        }, config.enfocar, config.cantidad_kg);
+        }, config.buscar, config.enfocar, bodyTexto);
 
         console.log(`  → ${productos.length} productos encontrados`);
 

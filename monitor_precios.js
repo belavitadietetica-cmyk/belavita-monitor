@@ -213,43 +213,71 @@ async function monitorear() {
     console.log('\n📦 EL SEMBRADOR');
     console.log('  🔐 Logueando...');
 
-    // Ir a la página primero para establecer el dominio y cookies base
+    // Ir al sitio para establecer el dominio
     await page.goto('https://el-sembrador.com.ar/', { waitUntil: 'domcontentloaded', timeout: 30000 });
     await delay(2000);
 
-    // Hacer el POST de login directamente via fetch desde el browser context
-    // Igual que funciona manualmente — Status 200, redirige a /mi-cuenta/
+    // Hacer POST de login y capturar las cookies de la respuesta
+    // Usamos XMLHttpRequest en vez de fetch para mejor control de cookies
     const loginResult = await page.evaluate(async (user, pass) => {
-      try {
+      return new Promise((resolve) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', 'https://el-sembrador.com.ar/dyl/', true);
+        xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+        xhr.withCredentials = true;
+        xhr.onreadystatechange = function() {
+          if (xhr.readyState === 4) {
+            resolve({ 
+              status: xhr.status, 
+              finalUrl: xhr.responseURL,
+              responseText: xhr.responseText.substring(0, 200)
+            });
+          }
+        };
         const body = `log=${encodeURIComponent(user)}&pwd=${encodeURIComponent(pass)}&redirect_to=%2Fmi-cuenta%2F&rememberme=forever`;
-        const res = await fetch('https://el-sembrador.com.ar/dyl/', {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: body,
-          redirect: 'follow',
-        });
-        return { status: res.status, url: res.url, ok: res.ok };
-      } catch(e) {
-        return { error: e.message };
-      }
+        xhr.send(body);
+      });
     }, SEMBRADOR_USER, SEMBRADOR_PASS);
 
-    console.log('  → Login result:', JSON.stringify(loginResult));
+    console.log('  → XHR status:', loginResult.status);
+    console.log('  → XHR url:', loginResult.finalUrl);
 
-    const estaLogueado = loginResult.url && loginResult.url.includes('mi-cuenta') && !loginResult.url.includes('dyl');
-    console.log(estaLogueado ? '  ✓ Login OK' : '  ⚠ Login fallido');
+    await delay(2000);
 
-    // Navegar a mi-cuenta para que las cookies queden activas en Puppeteer
-    if (estaLogueado || loginResult.status === 200) {
-      await page.goto('https://el-sembrador.com.ar/mi-cuenta/', { waitUntil: 'domcontentloaded', timeout: 20000 });
-      await delay(1500);
-      const urlCheck = page.url();
-      const txtCheck = await page.evaluate(() => document.body?.innerText?.substring(0,100)?.replace(/\n/g,' ') || '');
-      console.log('  → Verificación URL:', urlCheck);
-      console.log('  → Verificación texto:', txtCheck);
-    }
+    // Navegar a mi-cuenta para activar la sesión
+    await page.goto('https://el-sembrador.com.ar/mi-cuenta/', { waitUntil: 'networkidle2', timeout: 25000 });
+    await delay(2000);
 
+    // Verificar si estamos logueados viendo si hay un nombre de usuario
+    const verificacion = await page.evaluate(() => {
+      const txt = document.body?.innerText || '';
+      const url = window.location.href;
+      // Si estamos logueados, el texto NO tendrá "Nombre de usuario" ni "Contraseña"
+      const logueado = !txt.includes('Nombre de usuario') && !txt.includes('ERROR') && txt.includes('MI CUENTA');
+      // Buscar algún indicio del usuario logueado
+      const tieneNombre = txt.includes('Hola') || txt.includes('belavita') || txt.includes('Mi cuenta');
+      return { logueado, tieneNombre, url, preview: txt.substring(0, 200).replace(/\n/g,' ') };
+    });
+
+    console.log('  → Verificación:', JSON.stringify(verificacion));
+
+    // Probar yendo directo a un producto para ver si muestra precio
+    await page.goto('https://el-sembrador.com.ar/producto/almendra-non-pareil-27-30-importada/', { waitUntil: 'domcontentloaded', timeout: 20000 });
+    await delay(2000);
+    const testPrecio = await page.evaluate(() => {
+      const txt = document.body?.innerText || '';
+      const tieneVer = txt.includes('VER PRECIOS');
+      const tieneOferta = txt.includes('OFERTA');
+      // Buscar precio con formato $X.XXX.-
+      const match = txt.match(/\$\s*([\d.,]+)\.-/);
+      return { tieneVer, tieneOferta, precio: match ? match[1] : null, preview: txt.substring(0,300).replace(/\n/g,' ') };
+    });
+    console.log('  → Test precio almendra:', JSON.stringify(testPrecio));
+
+    const estaLogueado = !testPrecio.tieneVer && testPrecio.precio !== null;
+    console.log(estaLogueado ? '  ✓ Login OK - precios visibles' : '  ⚠ Login fallido - precios no visibles');
+
+    // ANALIZAR CADA PRODUCTO
     // ANALIZAR CADA PRODUCTO
     // ANALIZAR CADA PRODUCTO
     // ANALIZAR CADA PRODUCTO

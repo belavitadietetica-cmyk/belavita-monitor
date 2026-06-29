@@ -144,6 +144,8 @@ async function monitorear() {
         await delay(3000);
         await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
         await delay(1500);
+        const chars = await page.evaluate(() => document.body?.innerText?.length || 0);
+        console.log(`  → Categoría cargada: ${chars} chars · url: ${config.url}`);
 
         // Extraer productos y precios
         // Extraer productos del texto del body directamente

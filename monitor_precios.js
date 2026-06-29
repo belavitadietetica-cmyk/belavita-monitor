@@ -1,6 +1,7 @@
 // ═══════════════════════════════════════════════════════
-// BELAVITA OPS · Agente de análisis de precios
-// PRUEBA: solo Almendras Non Pareil
+// BELAVITA OPS · Agente de monitoreo de precios
+// El Sembrador (con login + búsqueda correcta)
+// Lunes, Miércoles y Viernes a las 8am
 // ═══════════════════════════════════════════════════════
 
 const { createClient } = require('@supabase/supabase-js');
@@ -10,8 +11,58 @@ const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_K
 const SEMBRADOR_USER = process.env.SEMBRADOR_USER;
 const SEMBRADOR_PASS = process.env.SEMBRADOR_PASS;
 
-// Delay helper
 const delay = ms => new Promise(r => setTimeout(r, ms));
+
+// ═══════════════════════════════════════════════════════
+// CONFIGURACIÓN DE PRODUCTOS A MONITOREAR
+// buscar: término exacto en el buscador
+// enfocar: variedad principal
+// cantidad_kg: cantidad a filtrar para precio mayorista
+// ═══════════════════════════════════════════════════════
+const PRODUCTOS_SEMBRADOR = [
+  {
+    buscar: 'almendra',
+    nombre_db: 'Almendras Non Pareil',
+    enfocar: ['NON PAREIL', 'NONPAREIL'],
+    cantidad_kg: 10,
+    nota_lucas: 'Priorizar Non Pareil importada. Si hay oferta en otra variedad avisarlo como oportunidad.',
+  },
+  {
+    buscar: 'nuez',
+    nombre_db: 'Nuez Mariposa',
+    enfocar: ['MARIPOSA EXTRA LIGHT', 'MARIPOSA LIGHT', 'CUARTO LIGHT', 'CUARTO EXTRA LIGHT'],
+    cantidad_kg: 10,
+    nota_lucas: 'Enfocar en Mariposa Extra Light y Cuarto Light. Comparar precio/kg entre variantes.',
+  },
+  {
+    buscar: 'chia',
+    nombre_db: 'Chía',
+    enfocar: ['CHIA AA', 'CHIA SEMILLA AA'],
+    cantidad_kg: 25,
+    nota_lucas: 'Comprar por 25kg. Verificar que sea AA (calidad máxima).',
+  },
+  {
+    buscar: 'harina coco',
+    nombre_db: 'Harina de Coco',
+    enfocar: ['HARINA COCO', 'HARINA DE COCO'],
+    cantidad_kg: 10,
+    nota_lucas: 'Un solo producto. Verificar precio por kg.',
+  },
+  {
+    buscar: 'psyllium',
+    nombre_db: 'Psyllium',
+    enfocar: ['PSYLLIUM', 'HARINA PSYLLIUM'],
+    cantidad_kg: 10,
+    nota_lucas: 'Filtrar por 10kg.',
+  },
+  {
+    buscar: 'manzanilla',
+    nombre_db: 'Manzanilla',
+    enfocar: ['MANZANILLA PURA FLOR', 'MANZANILLA'],
+    cantidad_kg: 2,
+    nota_lucas: 'Hay dos variantes: pura flor y con tallo. Informar precio de ambas.',
+  },
+];
 
 // ═══════════════════════════════════════════════════════
 // LANZAR BROWSER
@@ -19,383 +70,324 @@ const delay = ms => new Promise(r => setTimeout(r, ms));
 async function launchBrowser() {
   return puppeteer.launch({
     headless: 'new',
-    args: ['--no-sandbox','--disable-setuid-sandbox','--disable-dev-shm-usage','--disable-gpu','--window-size=1280,900'],
+    args: ['--no-sandbox','--disable-setuid-sandbox','--disable-dev-shm-usage','--disable-gpu'],
   });
 }
 
 // ═══════════════════════════════════════════════════════
-// EL SEMBRADOR · Login + precios almendras
+// LOGIN EN EL SEMBRADOR
 // ═══════════════════════════════════════════════════════
-async function scrapeSembrador(page) {
-  console.log('\n📦 EL SEMBRADOR');
-  const resultado = { proveedor: 'El Sembrador', productos: [], error: null };
+async function loginSembrador(page) {
+  console.log('  🔐 Logueando en El Sembrador...');
+  await page.goto('https://el-sembrador.com.ar/mi-cuenta/', { waitUntil: 'networkidle2', timeout: 30000 });
+  await page.waitForSelector('#user_login', { timeout: 10000 });
+  await page.click('#user_login', { clickCount: 3 });
+  await page.type('#user_login', SEMBRADOR_USER, { delay: 60 });
+  await page.click('#user_pass', { clickCount: 3 });
+  await page.type('#user_pass', SEMBRADOR_PASS, { delay: 60 });
+  await Promise.all([
+    page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 20000 }),
+    page.click('#wp-submit'),
+  ]);
+  const ok = page.url().includes('mi-cuenta') && !page.url().includes('login');
+  console.log(ok ? '  ✓ Login OK' : '  ⚠ Login puede haber fallado');
+  return ok;
+}
 
-  try {
-    // LOGIN
-    console.log('  🔐 Logueando...');
-    await page.goto('https://el-sembrador.com.ar/mi-cuenta/', { waitUntil: 'networkidle2', timeout: 30000 });
-    
-    // Esperar el form de login
-    await page.waitForSelector('#user_login', { timeout: 10000 });
-    await page.click('#user_login', { clickCount: 3 });
-    await page.type('#user_login', SEMBRADOR_USER, { delay: 60 });
-    await page.click('#user_pass', { clickCount: 3 });
-    await page.type('#user_pass', SEMBRADOR_PASS, { delay: 60 });
-    await Promise.all([
-      page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 20000 }),
-      page.click('#wp-submit'),
-    ]);
-    const urlPost = page.url();
-    const logueado = urlPost.includes('mi-cuenta') && !urlPost.includes('login');
-    console.log(logueado ? '  ✓ Login OK' : `  ⚠ Login incierto: ${urlPost}`);
-    await delay(1500);
+// ═══════════════════════════════════════════════════════
+// BUSCAR PRODUCTO EN TIENDA MAYORISTA
+// ═══════════════════════════════════════════════════════
+async function buscarProducto(page, config) {
+  console.log(`\n  🔍 Buscando: "${config.buscar}"`);
 
-    // ALMENDRA NON PAREIL IMPORTADA (la que compramos)
-    console.log('  → Almendra Non Pareil 27-30 Importada...');
-    await page.goto('https://el-sembrador.com.ar/producto/almendra-non-pareil-27-30-importada/', { waitUntil: 'domcontentloaded', timeout: 15000 });
-    await delay(1500);
-    
-    const datosAlmendra = await page.evaluate(() => {
-      // Precio de oferta (en <ins>) vs precio normal (en <del>)
-      const precioOferta = document.querySelector('ins .woocommerce-Price-amount bdi, ins .amount bdi');
-      const precioNormal = document.querySelector('del .woocommerce-Price-amount bdi, del .amount bdi');
-      const precioSimple = document.querySelector('.woocommerce-Price-amount bdi, p.price .amount');
-      
+  // Ir a la tienda mayorista con búsqueda
+  const url = `https://el-sembrador.com.ar/tienda/?s=${encodeURIComponent(config.buscar)}&post_type=product`;
+  await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 });
+  await delay(1500);
+
+  // Extraer todos los productos de los resultados
+  const productos = await page.evaluate((enfocar, cantidad_kg) => {
+    const items = [];
+    document.querySelectorAll('.product, .type-product, li.product').forEach(el => {
+      const nombre = el.querySelector('h2, .woocommerce-loop-product__title, .product-title')?.innerText?.trim() || '';
+      if (!nombre) return;
+
+      // Precio
+      const precioOferta = el.querySelector('ins .woocommerce-Price-amount bdi, ins .amount');
+      const precioNormal = el.querySelector('del .woocommerce-Price-amount bdi, del .amount');
+      const precioBase = el.querySelector('.woocommerce-Price-amount bdi, .price .amount');
+
       const limpiar = t => t ? parseFloat(t.innerText.replace(/[^0-9,]/g,'').replace(',','.')) : null;
-      
       const oferta = limpiar(precioOferta);
-      const normal = limpiar(precioNormal);
-      const simple = limpiar(precioSimple);
-      
-      // Buscar texto de descuento por cantidad
-      const bodyTxt = document.body.innerText;
-      const descuentoMatch = bodyTxt.match(/10%\s*de\s*descuento|descuento.*cantidad|MONTO.MÍNIMO/i);
-      
-      return {
-        nombre: 'Almendra Non Pareil 27-30 Importada',
-        precio_oferta: oferta,
-        precio_normal: normal || simple,
-        precio_efectivo: oferta || simple,
+      const normal = limpiar(precioNormal) || limpiar(precioBase);
+      const efectivo = oferta || normal;
+
+      // Mejor precio por cantidad (texto "Mejor precio comprando a partir de X kgs")
+      const mejorTxt = el.innerText || '';
+      const mejorMatch = mejorTxt.match(/partir de[:\s]*([\d]+)\s*kg/i);
+      const mejor_kgs = mejorMatch ? parseInt(mejorMatch[1]) : null;
+
+      // URL del producto
+      const link = el.querySelector('a')?.href || '';
+
+      // ¿Es el enfocado?
+      const nombreUp = nombre.toUpperCase();
+      const esEnfocado = enfocar.some(e => nombreUp.includes(e.toUpperCase()));
+
+      items.push({
+        nombre,
+        precio_base: efectivo,
+        precio_anterior: normal,
         tiene_oferta: !!oferta,
-        descuento_cantidad: !!descuentoMatch,
-        nota_cantidad: descuentoMatch ? descuentoMatch[0] : null,
-        url: window.location.href,
-      };
+        mejor_kgs,
+        link,
+        es_enfocado: esEnfocado,
+      });
     });
+    return items;
+  }, config.enfocar, config.cantidad_kg);
 
-    console.log(`  ✓ Precio: $${datosAlmendra.precio_efectivo?.toLocaleString('es-AR') || '—'} ${datosAlmendra.tiene_oferta ? '(EN OFERTA)' : ''}`);
-    resultado.productos.push(datosAlmendra);
+  console.log(`  → ${productos.length} productos encontrados`);
 
-    // ALMENDRA NON PAREIL MEDIANA NACIONAL (alternativa)
-    console.log('  → Almendra Non Pareil Mediana Nacional...');
-    await page.goto('https://el-sembrador.com.ar/producto/almendra-non-pareil-mediana-nacional/', { waitUntil: 'domcontentloaded', timeout: 15000 });
-    await delay(1500);
+  // Para los productos enfocados, entrar a su página y buscar precio por cantidad
+  const resultados = [];
+  for (const prod of productos) {
+    if (!prod.precio_base) continue;
 
-    const datosNacional = await page.evaluate(() => {
-      const precioOferta = document.querySelector('ins .woocommerce-Price-amount bdi');
-      const precioSimple = document.querySelector('.woocommerce-Price-amount bdi');
-      const limpiar = t => t ? parseFloat(t.innerText.replace(/[^0-9,]/g,'').replace(',','.')) : null;
-      const oferta = limpiar(precioOferta);
-      const simple = limpiar(precioSimple);
-      
-      // Buscar variaciones de precio por kg (select de peso)
-      const opciones = [];
-      document.querySelectorAll('select option, .variable-item').forEach(el => {
-        const txt = el.innerText || el.textContent;
-        if (txt && (txt.includes('kg') || txt.includes('g ('))) {
-          opciones.push(txt.trim());
+    let precio_cantidad = null;
+    let nota_cantidad = '';
+
+    // Entrar al producto para ver precio por cantidad específica
+    if (prod.link && (prod.es_enfocado || productos.length <= 3)) {
+      try {
+        await page.goto(prod.link, { waitUntil: 'domcontentloaded', timeout: 12000 });
+        await delay(800);
+
+        const detalle = await page.evaluate((kg_buscar) => {
+          // Buscar precio por cantidad en el texto de la página
+          const txt = document.body.innerText;
+
+          // Formato: "500 g ($20.490 x kg)" o "10 kg ($17.896 x kg)"
+          const matches = [...txt.matchAll(/([\d]+)\s*kg?\s*\(\$\s*([\d.,]+)\s*x\s*kg\)/gi)];
+          let precio_mejor = null;
+          let kg_mejor = null;
+
+          for (const m of matches) {
+            const kg = parseFloat(m[1]);
+            const precio = parseFloat(m[2].replace(/\./g,'').replace(',','.'));
+            if (kg >= kg_buscar && (!precio_mejor || precio < precio_mejor)) {
+              precio_mejor = precio;
+              kg_mejor = kg;
+            }
+          }
+
+          // También buscar descuento por monto
+          const descMatch = txt.match(/10%.*descuento|descuento.*10%|MONTO M[IÍ]NIMO/i);
+          const mejorKg = txt.match(/partir de[:\s]*([\d]+)\s*kg/i);
+
+          return {
+            precio_por_kg_cantidad: precio_mejor,
+            kg_cantidad: kg_mejor,
+            tiene_descuento_monto: !!descMatch,
+            mejor_a_partir_de: mejorKg ? parseInt(mejorKg[1]) : null,
+          };
+        }, config.cantidad_kg);
+
+        precio_cantidad = detalle.precio_por_kg_cantidad;
+        if (precio_cantidad) {
+          nota_cantidad = `${config.cantidad_kg}kg = $${Math.round(precio_cantidad * config.cantidad_kg).toLocaleString('es-AR')} ($${Math.round(precio_cantidad).toLocaleString('es-AR')}/kg)`;
         }
-      });
+        if (detalle.tiene_descuento_monto) {
+          nota_cantidad += ' · tiene descuento por monto';
+        }
+        if (detalle.mejor_a_partir_de) {
+          nota_cantidad += ` · mejor precio comprando ${detalle.mejor_a_partir_de}kg+`;
+        }
 
-      return {
-        nombre: 'Almendra Non Pareil Mediana Nacional',
-        precio_oferta: oferta,
-        precio_efectivo: oferta || simple,
-        tiene_oferta: !!oferta,
-        opciones_peso: opciones,
-        url: window.location.href,
-        hay_stock: !document.body.innerText.includes('sin existencias') && !document.body.innerText.includes('Agotado'),
-      };
-    });
-
-    console.log(`  ✓ Nacional: $${datosNacional.precio_efectivo?.toLocaleString('es-AR') || 'Sin stock'} · Stock: ${datosNacional.hay_stock ? 'Sí' : 'No'}`);
-    if (datosNacional.opciones_peso.length > 0) console.log(`    Opciones: ${datosNacional.opciones_peso.join(' | ')}`);
-    resultado.productos.push(datosNacional);
-
-    // Precio por 10kg en El Sembrador (10% descuento por monto)
-    // El sembrador da 10% si comprás $150.000+, para almendras eso equivale a ~8-9kg
-    const precio1kg = datosAlmendra.precio_efectivo;
-    if (precio1kg) {
-      resultado.precio_10kg = precio1kg * 10 * 0.90; // con 10% descuento
-      resultado.precio_por_kg_10kg = precio1kg * 0.90;
-      console.log(`  📊 Precio estimado 10kg (con 10% dto): $${resultado.precio_10kg.toLocaleString('es-AR')} → $${resultado.precio_por_kg_10kg.toLocaleString('es-AR')}/kg`);
+        await delay(600);
+      } catch(e) {
+        console.log(`  ⚠ Error entrando a ${prod.nombre}: ${e.message}`);
+      }
     }
 
-  } catch(e) {
-    resultado.error = e.message;
-    console.log('  ❌ Error:', e.message);
+    resultados.push({
+      ...prod,
+      precio_cantidad,
+      nota_cantidad,
+    });
+
+    const estado = prod.tiene_oferta ? '🔥 OFERTA' : '';
+    const precioShow = precio_cantidad
+      ? `$${Math.round(precio_cantidad).toLocaleString('es-AR')}/kg (${config.cantidad_kg}kg)`
+      : `$${Math.round(prod.precio_base).toLocaleString('es-AR')}/kg`;
+    console.log(`  ${prod.es_enfocado ? '✓' : '·'} ${prod.nombre}: ${precioShow} ${estado}`);
   }
 
-  return resultado;
+  return resultados;
 }
 
 // ═══════════════════════════════════════════════════════
-// MOLY MARKET · Precios almendras
+// OFERTAS DE LA SEMANA EN TIENDA MAYORISTA
 // ═══════════════════════════════════════════════════════
-async function scrapeMoly(page) {
-  console.log('\n📦 MOLY MARKET');
-  const resultado = { proveedor: 'Moly Market', productos: [], error: null };
-
+async function scrapeOfertasSemana(page) {
+  console.log('\n  🏷️ Revisando ofertas de la semana...');
   try {
-    // Moly tiene variaciones por peso en la misma página de producto
-    await page.goto('https://www.molymarket.com.ar/producto/almendra-non-pareil/', { waitUntil: 'domcontentloaded', timeout: 15000 });
-    await delay(1500);
-
-    const datos = await page.evaluate(() => {
-      const limpiar = t => t ? parseFloat(t.innerText.replace(/[^0-9,]/g,'').replace(',','.')) : null;
-      const precio = document.querySelector('ins .woocommerce-Price-amount bdi, .woocommerce-Price-amount bdi');
-      const sinStock = document.body.innerText.includes('sin existencias') || document.body.innerText.includes('Agotado') || document.body.innerText.includes('agotado');
-      
-      // Buscar variaciones de precio por peso en el texto de la página
-      const variaciones = [];
-      document.querySelectorAll('table.variations td, .woocommerce-variation-price, option').forEach(el => {
-        const t = el.innerText || el.textContent;
-        if (t && (t.includes('$') || t.includes('kg'))) variaciones.push(t.trim());
-      });
-
-      return {
-        nombre: 'Almendra Non Pareil',
-        precio_efectivo: limpiar(precio),
-        sin_stock: sinStock,
-        variaciones,
-        url: window.location.href,
-      };
-    });
-
-    if (datos.sin_stock) {
-      console.log('  ⚠ Sin stock de Almendra Non Pareil en Moly Market');
-      datos.nota = 'SIN STOCK';
-    } else {
-      console.log(`  ✓ Precio: $${datos.precio_efectivo?.toLocaleString('es-AR') || '—'}`);
-    }
-    resultado.productos.push(datos);
-
-    // Buscar almendra mediana como alternativa
-    await page.goto('https://www.molymarket.com.ar/producto/almendra-mediana/', { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
-    await delay(1000);
-    const datosAlt = await page.evaluate(() => {
-      const limpiar = t => t ? parseFloat(t.innerText.replace(/[^0-9,]/g,'').replace(',','.')) : null;
-      const precio = document.querySelector('ins .woocommerce-Price-amount bdi, .woocommerce-Price-amount bdi');
-      const sinStock = document.body.innerText.includes('sin existencias') || document.body.innerText.includes('Agotado');
-      return {
-        nombre: 'Almendra Mediana (alternativa)',
-        precio_efectivo: limpiar(precio),
-        sin_stock: sinStock,
-        url: window.location.href,
-      };
-    });
-    if (page.url().includes('almendra-mediana')) {
-      resultado.productos.push(datosAlt);
-      console.log(`  ✓ Mediana alternativa: $${datosAlt.precio_efectivo?.toLocaleString('es-AR') || '—'} ${datosAlt.sin_stock ? '(sin stock)' : ''}`);
-    }
-
-  } catch(e) {
-    resultado.error = e.message;
-    console.log('  ❌ Error:', e.message);
-  }
-
-  return resultado;
-}
-
-// ═══════════════════════════════════════════════════════
-// BERNAL · Precios almendras (solo 1kg y 10kg, no 500g)
-// ═══════════════════════════════════════════════════════
-async function scrapeBernal(page) {
-  console.log('\n📦 BERNAL');
-  const resultado = { proveedor: 'Bernal', productos: [], error: null };
-
-  try {
-    // Bernal tiene buscador — usar URL con búsqueda
-    await page.goto('https://gglobal.net.ar/bernal/?cliente&buscar=almendra', { waitUntil: 'domcontentloaded', timeout: 20000 });
+    await page.goto('https://el-sembrador.com.ar/tienda/', { waitUntil: 'domcontentloaded', timeout: 20000 });
     await delay(2000);
 
-    const productos = await page.evaluate(() => {
+    const ofertas = await page.evaluate(() => {
       const items = [];
-      // Buscar todos los elementos que contengan "almendra" y un precio
-      const textos = document.querySelectorAll('*');
-      const vistos = new Set();
-      
-      textos.forEach(el => {
-        const txt = (el.innerText || '').trim();
-        if (!txt.toLowerCase().includes('almendra')) return;
-        if (txt.length > 200) return; // saltar contenedores grandes
-        if (vistos.has(txt)) return;
-        
-        // Buscar precio en el texto del elemento o sus hermanos
-        const pMatch = txt.match(/\$\s*([\d.,]+)/);
-        if (!pMatch) return;
-        
-        const precio = parseFloat(pMatch[1].replace(/\./g,'').replace(',','.'));
-        if (precio < 1000) return; // filtrar precios de 100g/500g pequeños
-        
-        // Excluir si dice 500g, 100g
-        if (txt.includes('500') && txt.includes('g') && !txt.includes('kg')) return;
-        if (txt.includes('100') && txt.includes('g') && !txt.includes('kg')) return;
-        
-        vistos.add(txt);
-        
-        // Calcular precio por kg
-        let precio_por_kg = precio;
-        let unidad = '1kg';
-        if (txt.includes('10') && txt.includes('K')) { precio_por_kg = precio / 10; unidad = '10kg'; }
-        else if (txt.includes('5') && txt.includes('K')) { precio_por_kg = precio / 5; unidad = '5kg'; }
-        
-        items.push({ nombre: txt.substring(0, 80), precio_total: precio, precio_por_kg, unidad });
+      // Productos con precio tachado (ins = oferta)
+      document.querySelectorAll('.product, li.product').forEach(el => {
+        const tieneOferta = el.querySelector('ins') && el.querySelector('del');
+        if (!tieneOferta) return;
+        const nombre = el.querySelector('h2, .woocommerce-loop-product__title')?.innerText?.trim() || '';
+        const precioOferta = el.querySelector('ins .woocommerce-Price-amount bdi');
+        const precioAntes = el.querySelector('del .woocommerce-Price-amount bdi');
+        const limpiar = t => t ? parseFloat(t.innerText.replace(/[^0-9,]/g,'').replace(',','.')) : null;
+        const po = limpiar(precioOferta);
+        const pa = limpiar(precioAntes);
+        if (po && pa && nombre) {
+          const pct = Math.round(((pa - po) / pa) * 100);
+          items.push({ nombre, precio_oferta: po, precio_antes: pa, descuento_pct: pct });
+        }
       });
-      
-      return items.slice(0, 8); // máximo 8 resultados
+      return items;
     });
 
-    if (productos.length === 0) {
-      console.log('  ⚠ No se encontraron almendras en Bernal');
+    if (ofertas.length > 0) {
+      console.log(`  → ${ofertas.length} productos en oferta esta semana:`);
+      ofertas.forEach(o => console.log(`    🔥 ${o.nombre}: $${Math.round(o.precio_oferta).toLocaleString('es-AR')} (antes $${Math.round(o.precio_antes).toLocaleString('es-AR')}, -${o.descuento_pct}%)`));
     } else {
-      productos.forEach(p => {
-        console.log(`  ✓ ${p.nombre} → $${p.precio_total.toLocaleString('es-AR')} (${p.unidad}) · $${Math.round(p.precio_por_kg).toLocaleString('es-AR')}/kg`);
-      });
+      console.log('  → Sin ofertas detectadas esta semana');
     }
-    resultado.productos = productos;
-
+    return ofertas;
   } catch(e) {
-    resultado.error = e.message;
-    console.log('  ❌ Error:', e.message);
+    console.log('  ⚠ Error revisando ofertas:', e.message);
+    return [];
   }
-
-  return resultado;
 }
 
 // ═══════════════════════════════════════════════════════
-// GENERAR RECOMENDACIÓN PARA LUCAS
+// GENERAR REPORTE PARA LUCAS
 // ═══════════════════════════════════════════════════════
-async function generarRecomendacion(sembrador, moly, bernal, ultimoPrecio) {
-  console.log('\n🧠 Generando recomendación...');
+async function generarReporte(resultadosPorProducto, ofertas, ultimosPrecios) {
+  const lineas = [];
+  const fecha = new Date().toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Mendoza', weekday: 'long', day: 'numeric', month: 'long' });
+  lineas.push(`📊 ANÁLISIS SEMANAL · El Sembrador · ${fecha}`);
+  lineas.push('');
 
-  const opciones = [];
+  let totalAhorro = 0;
 
-  // El Sembrador
-  const precioSemb = sembrador.precio_por_kg_10kg || sembrador.productos[0]?.precio_efectivo;
-  if (precioSemb) {
-    opciones.push({
-      proveedor: 'El Sembrador',
-      precio_kg: precioSemb,
-      ventajas: ['Factura A incluida', '30 días de pago', sembrador.precio_10kg ? `10kg = $${Math.round(sembrador.precio_10kg).toLocaleString('es-AR')} (10% dto)` : ''],
-      precio_display: sembrador.precio_10kg
-        ? `$${Math.round(sembrador.precio_10kg).toLocaleString('es-AR')} por 10kg ($${Math.round(precioSemb).toLocaleString('es-AR')}/kg con dto)`
-        : `$${Math.round(precioSemb).toLocaleString('es-AR')}/kg`,
-    });
-  }
+  for (const [config, resultados] of resultadosPorProducto) {
+    if (!resultados.length) continue;
 
-  // Moly Market
-  const prodMoly = moly.productos.find(p => !p.sin_stock && p.precio_efectivo);
-  if (prodMoly) {
-    const precioMoly = prodMoly.precio_efectivo;
-    opciones.push({
-      proveedor: 'Moly Market',
-      precio_kg: precioMoly,
-      ventajas: ['Precio sin IVA', '14 días pago', prodMoly.nombre !== 'Almendra Non Pareil' ? '⚠ Es alternativa, no Non Pareil' : ''],
-      precio_display: `$${Math.round(precioMoly).toLocaleString('es-AR')}/kg`,
-      advertencia: prodMoly.nota === 'SIN STOCK' ? 'SIN STOCK Non Pareil' : null,
-    });
-  } else if (moly.productos.length > 0) {
-    opciones.push({ proveedor: 'Moly Market', precio_kg: null, advertencia: 'SIN STOCK de Almendra Non Pareil' });
-  }
+    const enfocados = resultados.filter(r => r.es_enfocado);
+    const mejor = enfocados[0] || resultados[0];
 
-  // Bernal (mejor precio por kg entre los de 1kg o 10kg)
-  const mejorBernal = bernal.productos
-    .filter(p => p.precio_por_kg > 0)
-    .sort((a,b) => a.precio_por_kg - b.precio_por_kg)[0];
-  if (mejorBernal) {
-    opciones.push({
-      proveedor: 'Bernal',
-      precio_kg: mejorBernal.precio_por_kg,
-      ventajas: [`${mejorBernal.unidad}: $${mejorBernal.precio_total.toLocaleString('es-AR')} total`, 'Sin factura A (+8% si la pedís)'],
-      precio_display: `$${Math.round(mejorBernal.precio_por_kg).toLocaleString('es-AR')}/kg (${mejorBernal.unidad})`,
-    });
-  }
+    lineas.push(`🌿 ${config.nombre_db.toUpperCase()}`);
 
-  // Elegir mejor opción por precio/kg
-  const conPrecio = opciones.filter(o => o.precio_kg);
-  conPrecio.sort((a,b) => a.precio_kg - b.precio_kg);
-  const mejor = conPrecio[0];
+    // Precio actual vs anterior
+    const precioActual = mejor.precio_cantidad || mejor.precio_base;
+    const precioAnterior = ultimosPrecios[config.nombre_db];
 
-  // Calcular variación vs último precio
-  let varMsg = '';
-  if (ultimoPrecio && mejor?.precio_kg) {
-    const var_pct = ((mejor.precio_kg - ultimoPrecio) / ultimoPrecio) * 100;
-    if (Math.abs(var_pct) >= 1) {
-      varMsg = var_pct > 0
-        ? `📈 Subió ${var_pct.toFixed(1)}% vs última compra ($${Math.round(ultimoPrecio).toLocaleString('es-AR')}/kg)`
-        : `📉 Bajó ${Math.abs(var_pct).toFixed(1)}% vs última compra ($${Math.round(ultimoPrecio).toLocaleString('es-AR')}/kg)`;
-    } else {
-      varMsg = `= Precio estable vs última compra ($${Math.round(ultimoPrecio).toLocaleString('es-AR')}/kg)`;
+    if (precioAnterior && precioActual) {
+      const var_pct = ((precioActual - precioAnterior) / precioAnterior) * 100;
+      const ahorroPosible = Math.round((precioAnterior - precioActual) * config.cantidad_kg);
+
+      if (Math.abs(var_pct) >= 1) {
+        const sube = var_pct > 0;
+        lineas.push(`${sube ? '📈' : '📉'} ${sube ? 'Subió' : 'Bajó'} ${Math.abs(var_pct).toFixed(1)}% vs última compra`);
+        if (!sube && ahorroPosible > 0) {
+          lineas.push(`💰 Ahorro en este pedido (${config.cantidad_kg}kg): $${Math.abs(ahorroPosible).toLocaleString('es-AR')}`);
+          totalAhorro += Math.abs(ahorroPosible);
+        }
+      } else {
+        lineas.push(`= Precio estable`);
+      }
     }
+
+    // Mostrar variantes encontradas
+    resultados.forEach(r => {
+      const precio_show = r.precio_cantidad
+        ? `$${Math.round(r.precio_cantidad).toLocaleString('es-AR')}/kg · ${r.nota_cantidad}`
+        : `$${Math.round(r.precio_base).toLocaleString('es-AR')}/kg`;
+      const tag = r.es_enfocado ? '✓' : '·';
+      const oferta = r.tiene_oferta ? ' 🔥 OFERTA' : '';
+      lineas.push(`  ${tag} ${r.nombre}: ${precio_show}${oferta}`);
+    });
+
+    // Oportunidades
+    const noEnfocado = resultados.find(r => !r.es_enfocado && r.tiene_oferta);
+    if (noEnfocado) {
+      lineas.push(`  💡 Oportunidad: ${noEnfocado.nombre} en oferta a $${Math.round(noEnfocado.precio_base).toLocaleString('es-AR')}/kg · Lucas decide si conviene`);
+    }
+    lineas.push('');
   }
 
-  // Armar mensaje final para Lucas
-  let recomendacion = `🌰 ANÁLISIS ALMENDRAS NON PAREIL\n\n`;
-  
-  opciones.forEach(o => {
-    if (o.advertencia) {
-      recomendacion += `❌ ${o.proveedor}: ${o.advertencia}\n`;
-    } else {
-      recomendacion += `• ${o.proveedor}: ${o.precio_display}\n`;
-      o.ventajas?.filter(v=>v).forEach(v => recomendacion += `  → ${v}\n`);
-    }
-    recomendacion += '\n';
+  // Ofertas generales de la semana
+  if (ofertas.length > 0) {
+    lineas.push('🔥 OTRAS OFERTAS ESTA SEMANA');
+    ofertas.slice(0, 5).forEach(o => {
+      lineas.push(`  · ${o.nombre}: $${Math.round(o.precio_oferta).toLocaleString('es-AR')}/kg (-${o.descuento_pct}%)`);
+    });
+    lineas.push('');
+  }
+
+  // Resumen de ahorro total
+  if (totalAhorro > 0) {
+    lineas.push(`✅ AHORRO TOTAL ESTIMADO ESTE PEDIDO: $${totalAhorro.toLocaleString('es-AR')}`);
+    lineas.push('   (comparado con precios de la última compra)');
+  }
+
+  return lineas.join('\n');
+}
+
+// ═══════════════════════════════════════════════════════
+// GUARDAR PRECIO EN SUPABASE
+// ═══════════════════════════════════════════════════════
+async function guardarPrecio(prod, proveedor_id, precio_nuevo) {
+  if (!prod?.id || !precio_nuevo) return null;
+  const { data: ult } = await sb.schema('ops').from('precios_historico')
+    .select('precio_sin_iva').eq('producto_id', prod.id).eq('proveedor_id', proveedor_id)
+    .order('fecha_registro', {ascending:false}).limit(1).maybeSingle();
+  const anterior = ult?.precio_sin_iva || null;
+  await sb.schema('ops').from('precios_historico').insert({
+    producto_id: prod.id, proveedor_id, precio_sin_iva: precio_nuevo,
+    fuente: 'agente', ahorro_vs_anterior: anterior ? anterior - precio_nuevo : 0,
   });
-
-  if (mejor) {
-    recomendacion += `✅ RECOMENDACIÓN: Comprar en ${mejor.proveedor}\n`;
-    recomendacion += `   Precio: ${mejor.precio_display}\n`;
-    if (mejor.proveedor === 'El Sembrador') recomendacion += `   → Factura A incluida + mejor precio con descuento por cantidad\n`;
-    if (mejor.proveedor === 'Bernal') recomendacion += `   → Más barato pero sin factura A. Pedirla suma +8%\n`;
-    if (mejor.proveedor === 'Moly Market') recomendacion += `   → Sin factura A incluida (+10.5% si la pedís)\n`;
-  }
-
-  if (varMsg) recomendacion += `\n${varMsg}`;
-
-  return recomendacion;
+  return anterior;
 }
 
 // ═══════════════════════════════════════════════════════
 // FUNCIÓN PRINCIPAL
 // ═══════════════════════════════════════════════════════
 async function monitorear() {
-  console.log(`\n🔍 BELAVITA OPS · Análisis de precios · ALMENDRAS`);
-  console.log(`📅 ${new Date().toLocaleString('es-AR', { timeZone: 'America/Argentina/Mendoza' })}`);
+  const ahora = new Date().toLocaleString('es-AR', { timeZone: 'America/Argentina/Mendoza' });
+  console.log(`\n🔍 BELAVITA OPS · Monitoreo de precios`);
+  console.log(`📅 ${ahora}`);
   console.log('═'.repeat(55));
 
-  // Cargar datos de Supabase
   const { data: provs } = await sb.schema('ops').from('proveedores').select('id, nombre');
   const provMap = {};
   provs?.forEach(p => { provMap[p.nombre] = p.id; });
 
-  const { data: prod } = await sb.schema('ops').from('productos')
-    .select('id, nombre').ilike('nombre', '%almendra%').limit(1).maybeSingle();
+  const { data: prods } = await sb.schema('ops').from('productos').select('id, nombre').eq('activo', true);
+  const prodMap = {};
+  prods?.forEach(p => { prodMap[p.nombre.toLowerCase()] = p; });
 
-  // Último precio de almendras en El Sembrador
-  let ultimoPrecio = null;
-  if (prod?.id) {
-    const { data: ult } = await sb.schema('ops').from('precios_historico')
-      .select('precio_sin_iva').eq('producto_id', prod.id)
-      .order('fecha_registro', { ascending: false }).limit(1).maybeSingle();
-    ultimoPrecio = ult?.precio_sin_iva;
-    if (ultimoPrecio) console.log(`\n💾 Último precio en DB: $${Math.round(ultimoPrecio).toLocaleString('es-AR')}/kg`);
+  function findProd(nombre) {
+    const key = nombre.toLowerCase();
+    if (prodMap[key]) return prodMap[key];
+    for (const [k, v] of Object.entries(prodMap)) {
+      if (k.includes(key.split(' ')[0])) return v;
+    }
+    return null;
   }
 
   let browser = null;
-  let sembrador = { proveedor: 'El Sembrador', productos: [], error: 'no ejecutado' };
-  let moly = { proveedor: 'Moly Market', productos: [], error: 'no ejecutado' };
-  let bernal = { proveedor: 'Bernal', productos: [], error: 'no ejecutado' };
+  const resultadosPorProducto = [];
+  const ultimosPrecios = {};
 
   try {
     console.log('\n🌐 Iniciando navegador...');
@@ -405,58 +397,64 @@ async function monitorear() {
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
     await page.setExtraHTTPHeaders({ 'Accept-Language': 'es-AR,es;q=0.9' });
 
-    sembrador = await scrapeSembrador(page);
-    await delay(1000);
-    moly = await scrapeMoly(page);
-    await delay(1000);
-    bernal = await scrapeBernal(page);
+    console.log('\n📦 EL SEMBRADOR');
+    await loginSembrador(page);
+    await delay(2000);
 
-  } catch(e) {
-    console.error('❌ Error general:', e.message);
+    // Ofertas de la semana
+    const ofertas = await scrapeOfertasSemana(page);
+    await delay(1000);
+
+    // Buscar cada producto
+    for (const config of PRODUCTOS_SEMBRADOR) {
+      const prod = findProd(config.nombre_db);
+
+      // Obtener último precio guardado
+      if (prod?.id) {
+        const { data: ult } = await sb.schema('ops').from('precios_historico')
+          .select('precio_sin_iva').eq('producto_id', prod.id).eq('proveedor_id', provMap['El Sembrador'])
+          .order('fecha_registro', {ascending:false}).limit(1).maybeSingle();
+        if (ult) ultimosPrecios[config.nombre_db] = ult.precio_sin_iva;
+      }
+
+      const resultados = await buscarProducto(page, config);
+      resultadosPorProducto.push([config, resultados]);
+
+      // Guardar precio del producto enfocado
+      if (prod && resultados.length > 0) {
+        const enfocado = resultados.find(r => r.es_enfocado) || resultados[0];
+        const precio = enfocado.precio_cantidad || enfocado.precio_base;
+        if (precio) await guardarPrecio(prod, provMap['El Sembrador'], precio);
+      }
+
+      await delay(1000);
+    }
+
+    // Generar reporte
+    const reporte = await generarReporte(resultadosPorProducto, ofertas, ultimosPrecios);
+    console.log('\n' + reporte);
+
+    // Guardar reporte como alerta para Lucas
+    const prodAlmendra = findProd('Almendras Non Pareil');
+    await sb.schema('ops').from('alertas').insert({
+      producto_id: prodAlmendra?.id || null,
+      tipo: 'analisis_proveedor',
+      mensaje: reporte,
+      datos: { productos_analizados: PRODUCTOS_SEMBRADOR.length, ofertas: ofertas.length },
+    });
+
   } finally {
     if (browser) await browser.close();
   }
 
-  // Generar recomendación
-  const recomendacion = await generarRecomendacion(sembrador, moly, bernal, ultimoPrecio);
-  console.log('\n' + recomendacion);
-
-  // Guardar precio más relevante (El Sembrador 1kg) en DB
-  if (prod?.id && sembrador.productos[0]?.precio_efectivo) {
-    await sb.schema('ops').from('precios_historico').insert({
-      producto_id: prod.id,
-      proveedor_id: provMap['El Sembrador'],
-      precio_sin_iva: sembrador.productos[0].precio_efectivo,
-      fuente: 'agente',
-      ahorro_vs_anterior: ultimoPrecio ? ultimoPrecio - sembrador.productos[0].precio_efectivo : 0,
-    });
-  }
-
-  // Guardar recomendación como alerta para Lucas
-  if (prod?.id) {
-    await sb.schema('ops').from('alertas').insert({
-      producto_id: prod.id,
-      tipo: 'analisis_proveedor',
-      mensaje: recomendacion,
-      datos: {
-        sembrador: sembrador.productos,
-        moly: moly.productos,
-        bernal: bernal.productos,
-        mejor_precio: sembrador.precio_por_kg_10kg || sembrador.productos[0]?.precio_efectivo,
-        fecha: new Date().toISOString(),
-      },
-    });
-  }
-
-  // Registrar ejecución
   await sb.schema('ops').from('monitoreo_precios').insert({
     proveedor_id: provMap['El Sembrador'],
-    productos_revisados: 1,
+    productos_revisados: PRODUCTOS_SEMBRADOR.length,
     alerta_generada: true,
     fecha_ejecucion: new Date().toISOString(),
   });
 
-  console.log('\n✅ Análisis completado');
+  console.log('\n✅ Monitoreo completado');
   console.log('═'.repeat(55));
 }
 

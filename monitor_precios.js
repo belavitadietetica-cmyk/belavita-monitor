@@ -249,13 +249,19 @@ async function monitorear() {
     const test = await page.evaluate(() => {
       const txt = document.body?.innerText || '';
       const tieneVer = txt.includes('VER PRECIOS');
-      const match = txt.match(/\$\s*([\d.]+)\.-/);
-      return { tieneVer, precio: match ? match[1] : null };
+      // Probar múltiples formatos de precio
+      const m1 = txt.match(/\$\s*([\d.]+)\.-/);
+      const m2 = txt.match(/\$\s*([\d.,]+)/);
+      const m3 = txt.match(/([\d.]+),00/);
+      const preview = txt.substring(0, 400).replace(/\n/g,' ');
+      return { tieneVer, m1: m1?.[1], m2: m2?.[1], m3: m3?.[1], preview };
     });
 
-    const estaLogueado = !test.tieneVer && test.precio !== null;
-    console.log(`  → Test: tieneVer=${test.tieneVer} precio=${test.precio}`);
-    console.log(estaLogueado ? '  ✓ Sesión activa - precios visibles' : '  ⚠ Sesión no activa - las cookies pueden haber expirado');
+    console.log(`  → tieneVer=${test.tieneVer}`);
+    console.log(`  → m1=$${test.m1} m2=$${test.m2} m3=$${test.m3}`);
+    console.log(`  → Preview: ${test.preview}`);
+    const estaLogueado = !test.tieneVer;
+    console.log(estaLogueado ? '  ✓ Sesión activa' : '  ⚠ Sesión no activa');
 
     // ANALIZAR CADA PRODUCTO
     // ANALIZAR CADA PRODUCTO

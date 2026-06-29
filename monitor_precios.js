@@ -213,87 +213,44 @@ async function monitorear() {
     console.log('\n📦 EL SEMBRADOR');
     console.log('  🔐 Logueando...');
 
-    // Cargar página de login con networkidle2 para que cargue todo
-    await page.goto('https://el-sembrador.com.ar/mi-cuenta/', { waitUntil: 'networkidle2', timeout: 40000 });
-    await delay(3000);
+    // Ir a la página primero para establecer el dominio y cookies base
+    await page.goto('https://el-sembrador.com.ar/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await delay(2000);
 
-    // Extraer el nonce de seguridad de WordPress
-    const nonce = await page.evaluate(() => {
-      // WordPress incluye un nonce en el form de login
-      const nonceField = document.querySelector('input[name="woocommerce-login-nonce"], input[name="_wpnonce"], input[name="woocommerce-reset-password-nonce"]');
-      return nonceField ? nonceField.value : null;
-    });
-    console.log('  → Nonce:', nonce ? nonce.substring(0,8)+'...' : 'no encontrado');
-
-    // Encontrar el formulario de login correcto
-    const formInfo = await page.evaluate(() => {
-      const forms = Array.from(document.querySelectorAll('form'));
-      for (const form of forms) {
-        const hasLog = form.querySelector('input[name="log"]');
-        const hasPwd = form.querySelector('input[name="pwd"]');
-        const hasSubmit = form.querySelector('input[type="submit"], button[type="submit"]');
-        if (hasLog && hasPwd) {
-          return {
-            action: form.action,
-            hasSubmit: !!hasSubmit,
-            submitText: hasSubmit ? (hasSubmit.value || hasSubmit.innerText) : null,
-            allInputs: Array.from(form.querySelectorAll('input')).map(i => ({name: i.name, type: i.type, value: i.type === 'hidden' ? i.value : ''}))
-          };
-        }
+    // Hacer el POST de login directamente via fetch desde el browser context
+    // Igual que funciona manualmente — Status 200, redirige a /mi-cuenta/
+    const loginResult = await page.evaluate(async (user, pass) => {
+      try {
+        const body = `log=${encodeURIComponent(user)}&pwd=${encodeURIComponent(pass)}&redirect_to=%2Fmi-cuenta%2F&rememberme=forever`;
+        const res = await fetch('https://el-sembrador.com.ar/dyl/', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: body,
+          redirect: 'follow',
+        });
+        return { status: res.status, url: res.url, ok: res.ok };
+      } catch(e) {
+        return { error: e.message };
       }
-      return null;
-    });
-    console.log('  → Form info:', JSON.stringify(formInfo));
+    }, SEMBRADOR_USER, SEMBRADOR_PASS);
 
-    if (formInfo) {
-      // Llenar y enviar el formulario paso a paso
-      await page.evaluate((user, pass) => {
-        const forms = Array.from(document.querySelectorAll('form'));
-        for (const form of forms) {
-          const cu = form.querySelector('input[name="log"]');
-          const cp = form.querySelector('input[name="pwd"]');
-          if (cu && cp) {
-            // Foco y disparo de eventos completos
-            cu.focus();
-            cu.value = '';
-            cu.value = user;
-            ['input','change','keyup','keydown'].forEach(e => cu.dispatchEvent(new Event(e, {bubbles:true})));
-            cp.focus();
-            cp.value = '';
-            cp.value = pass;
-            ['input','change','keyup','keydown'].forEach(e => cp.dispatchEvent(new Event(e, {bubbles:true})));
-            break;
-          }
-        }
-      }, SEMBRADOR_USER, SEMBRADOR_PASS);
-      
-      await delay(1000);
+    console.log('  → Login result:', JSON.stringify(loginResult));
 
-      // Click en submit y esperar navegación
-      await Promise.all([
-        page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 25000 }),
-        page.evaluate(() => {
-          const forms = Array.from(document.querySelectorAll('form'));
-          for (const form of forms) {
-            if (form.querySelector('input[name="log"]')) {
-              const btn = form.querySelector('input[type="submit"], button[type="submit"]');
-              if (btn) { btn.click(); return; }
-              form.submit();
-              return;
-            }
-          }
-        })
-      ]);
-      await delay(2000);
-    }
-
-    const urlFinal = page.url();
-    const previewFinal = await page.evaluate(() => document.body?.innerText?.substring(0,150)?.replace(/\n/g,' ') || '');
-    const estaLogueado = !previewFinal.includes('ERROR') && !previewFinal.includes('incorrectos') && !urlFinal.includes('/dyl/');
-    console.log('  → URL final:', urlFinal);
-    console.log('  → Preview:', previewFinal);
+    const estaLogueado = loginResult.url && loginResult.url.includes('mi-cuenta') && !loginResult.url.includes('dyl');
     console.log(estaLogueado ? '  ✓ Login OK' : '  ⚠ Login fallido');
 
+    // Navegar a mi-cuenta para que las cookies queden activas en Puppeteer
+    if (estaLogueado || loginResult.status === 200) {
+      await page.goto('https://el-sembrador.com.ar/mi-cuenta/', { waitUntil: 'domcontentloaded', timeout: 20000 });
+      await delay(1500);
+      const urlCheck = page.url();
+      const txtCheck = await page.evaluate(() => document.body?.innerText?.substring(0,100)?.replace(/\n/g,' ') || '');
+      console.log('  → Verificación URL:', urlCheck);
+      console.log('  → Verificación texto:', txtCheck);
+    }
+
+    // ANALIZAR CADA PRODUCTO
     // ANALIZAR CADA PRODUCTO
     // ANALIZAR CADA PRODUCTO
     // ANALIZAR CADA PRODUCTO

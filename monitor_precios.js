@@ -107,10 +107,11 @@ async function loginSembrador(page) {
       return false;
     }
 
+    // Limpiar y escribir con evaluate para evitar problemas con .type()
     await campoUser.click({ clickCount: 3 });
-    await campoUser.type(SEMBRADOR_USER, { delay: 60 });
+    await page.keyboard.type(SEMBRADOR_USER, { delay: 60 });
     await campoPass.click({ clickCount: 3 });
-    await campoPass.type(SEMBRADOR_PASS, { delay: 60 });
+    await page.keyboard.type(SEMBRADOR_PASS, { delay: 60 });
 
     // Buscar botón de submit
     let btnSubmit = null;

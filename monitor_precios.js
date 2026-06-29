@@ -89,11 +89,22 @@ async function leerPrecioProducto(page, url, cantidad_kg) {
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 });
     await delay(1500);
 
-    // Debug: ver qué página cargó realmente
-    const urlActual = page.url();
-    const preview = await page.evaluate(() => document.body?.innerText?.substring(0, 200)?.replace(/\n/g,' ') || '');
-    console.log(`    → URL: ${urlActual}`);
-    console.log(`    → Preview: ${preview}`);
+    // Clickear "VER PRECIOS" - El Sembrador oculta precios mayoristas detrás de este botón
+    const clickeado = await page.evaluate(() => {
+      const todos = Array.from(document.querySelectorAll('button, a, span, div, p'));
+      for (const el of todos) {
+        const txt = (el.innerText || el.textContent || '').trim().toUpperCase();
+        if (txt === 'VER PRECIOS' || txt === 'VER PRECIO') {
+          el.click();
+          return true;
+        }
+      }
+      return false;
+    });
+    if (clickeado) {
+      console.log('    → Clickeó VER PRECIOS, esperando...');
+      await delay(2500);
+    }
 
     const datos = await page.evaluate((kg) => {
       const txt = document.body?.innerText || '';
@@ -233,8 +244,59 @@ async function monitorear() {
     }, SEMBRADOR_USER, SEMBRADOR_PASS);
 
     await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
-    await delay(1500);
-    console.log('  ✓ Login OK');
+    await delay(2000);
+
+    // Verificar si realmente está logueado
+    const estadoLogin = await page.evaluate(() => {
+      const txt = document.body?.innerText || '';
+      const url = window.location.href;
+      const estaLogueado = txt.includes('Mi cuenta') && !txt.includes('Nombre de usuario') && !txt.includes('Contraseña');
+      return { url, logueado: estaLogueado, preview: txt.substring(0, 150).replace(/\n/g,' ') };
+    });
+    console.log('  → Estado login:', JSON.stringify(estadoLogin));
+
+    if (!estadoLogin.logueado) {
+      // Intentar login directo via POST con fetch
+      console.log('  → Login no detectado, reintentando con waitForSelector...');
+      try {
+        await page.goto('https://el-sembrador.com.ar/mi-cuenta/', { waitUntil: 'networkidle2', timeout: 30000 });
+        await delay(3000);
+        
+        // Esperar que aparezca el form de login
+        await page.waitForFunction(() => {
+          const forms = document.querySelectorAll('form');
+          for (const f of forms) {
+            if (f.querySelector('input[name="log"]') || f.querySelector('input[name="pwd"]')) return true;
+          }
+          return false;
+        }, { timeout: 10000 });
+
+        await page.evaluate((user, pass) => {
+          const forms = Array.from(document.querySelectorAll('form'));
+          let loginForm = null;
+          for (const form of forms) {
+            if (form.querySelector('input[name="log"]') || form.querySelector('input[name="pwd"]')) {
+              loginForm = form; break;
+            }
+          }
+          if (!loginForm) return;
+          const cu = loginForm.querySelector('input[name="log"]');
+          const cp = loginForm.querySelector('input[name="pwd"]');
+          if (cu) { cu.value = user; cu.dispatchEvent(new Event('input', {bubbles:true})); }
+          if (cp) { cp.value = pass; cp.dispatchEvent(new Event('input', {bubbles:true})); }
+          const btn = loginForm.querySelector('button[type="submit"], input[type="submit"]');
+          if (btn) btn.click();
+        }, SEMBRADOR_USER, SEMBRADOR_PASS);
+
+        await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 20000 }).catch(() => {});
+        await delay(2000);
+        const urlPost = page.url();
+        console.log('  → URL post-login:', urlPost);
+      } catch(e2) {
+        console.log('  → Reintento falló:', e2.message);
+      }
+    }
+    console.log('  ✓ Login completado');
 
     // ANALIZAR CADA PRODUCTO
     for (const prod_config of PRODUCTOS) {

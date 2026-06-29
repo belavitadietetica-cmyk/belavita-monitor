@@ -89,21 +89,31 @@ async function leerPrecioProducto(page, url, cantidad_kg) {
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 });
     await delay(1500);
 
-    // Clickear "VER PRECIOS" - El Sembrador oculta precios mayoristas detrás de este botón
-    const clickeado = await page.evaluate(() => {
-      const todos = Array.from(document.querySelectorAll('button, a, span, div, p'));
-      for (const el of todos) {
-        const txt = (el.innerText || el.textContent || '').trim().toUpperCase();
-        if (txt === 'VER PRECIOS' || txt === 'VER PRECIO') {
-          el.click();
-          return true;
+    // Clickear "VER PRECIOS" usando Puppeteer directamente
+    try {
+      // Buscar el elemento con texto VER PRECIOS
+      const btnVerPrecios = await page.evaluateHandle(() => {
+        const todos = Array.from(document.querySelectorAll('button, a, span, div, p, input'));
+        for (const el of todos) {
+          const txt = (el.innerText || el.textContent || el.value || '').trim().toUpperCase();
+          if (txt === 'VER PRECIOS' || txt === 'VER PRECIO') return el;
         }
+        return null;
+      });
+      
+      if (btnVerPrecios && btnVerPrecios.asElement()) {
+        console.log('    → Clickeando VER PRECIOS...');
+        await btnVerPrecios.asElement().click();
+        // Esperar que aparezca el precio en el DOM
+        await page.waitForFunction(() => {
+          const txt = document.body?.innerText || '';
+          return txt.match(/\$\s*[\d.,]+\.-/) !== null;
+        }, { timeout: 8000 }).catch(() => {});
+        await delay(1500);
+        console.log('    → Esperó precio dinámico');
       }
-      return false;
-    });
-    if (clickeado) {
-      console.log('    → Clickeó VER PRECIOS, esperando...');
-      await delay(2500);
+    } catch(eClick) {
+      // Si falla el click, continuar igual
     }
 
     const datos = await page.evaluate((kg) => {
@@ -209,74 +219,45 @@ async function monitorear() {
       else req.continue();
     });
 
-    // LOGIN
+    // LOGIN - usando cookies de sesión directamente
     console.log('\n📦 EL SEMBRADOR');
-    console.log('  🔐 Logueando...');
+    console.log('  🔐 Cargando sesión...');
 
-    // Ir al sitio para establecer el dominio
+    // Ir al sitio primero para establecer el dominio
     await page.goto('https://el-sembrador.com.ar/', { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await delay(2000);
+    await delay(1000);
 
-    // Hacer POST de login y capturar las cookies de la respuesta
-    // Usamos XMLHttpRequest en vez de fetch para mejor control de cookies
-    const loginResult = await page.evaluate(async (user, pass) => {
-      return new Promise((resolve) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open('POST', 'https://el-sembrador.com.ar/dyl/', true);
-        xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
-        xhr.withCredentials = true;
-        xhr.onreadystatechange = function() {
-          if (xhr.readyState === 4) {
-            resolve({ 
-              status: xhr.status, 
-              finalUrl: xhr.responseURL,
-              responseText: xhr.responseText.substring(0, 200)
-            });
-          }
-        };
-        const body = `log=${encodeURIComponent(user)}&pwd=${encodeURIComponent(pass)}&redirect_to=%2Fmi-cuenta%2F&rememberme=forever`;
-        xhr.send(body);
-      });
-    }, SEMBRADOR_USER, SEMBRADOR_PASS);
+    // Parsear y cargar las cookies de sesión
+    const cookieString = process.env.SEMBRADOR_COOKIES || '';
+    const cookies = cookieString.split(';').map(c => {
+      const [name, ...rest] = c.trim().split('=');
+      return {
+        name: name.trim(),
+        value: rest.join('=').trim(),
+        domain: 'el-sembrador.com.ar',
+        path: '/',
+      };
+    }).filter(c => c.name && c.value);
 
-    console.log('  → XHR status:', loginResult.status);
-    console.log('  → XHR url:', loginResult.finalUrl);
+    await page.setCookie(...cookies);
+    console.log(`  → ${cookies.length} cookies cargadas`);
 
-    await delay(2000);
-
-    // Navegar a mi-cuenta para activar la sesión
-    await page.goto('https://el-sembrador.com.ar/mi-cuenta/', { waitUntil: 'networkidle2', timeout: 25000 });
-    await delay(2000);
-
-    // Verificar si estamos logueados viendo si hay un nombre de usuario
-    const verificacion = await page.evaluate(() => {
-      const txt = document.body?.innerText || '';
-      const url = window.location.href;
-      // Si estamos logueados, el texto NO tendrá "Nombre de usuario" ni "Contraseña"
-      const logueado = !txt.includes('Nombre de usuario') && !txt.includes('ERROR') && txt.includes('MI CUENTA');
-      // Buscar algún indicio del usuario logueado
-      const tieneNombre = txt.includes('Hola') || txt.includes('belavita') || txt.includes('Mi cuenta');
-      return { logueado, tieneNombre, url, preview: txt.substring(0, 200).replace(/\n/g,' ') };
-    });
-
-    console.log('  → Verificación:', JSON.stringify(verificacion));
-
-    // Probar yendo directo a un producto para ver si muestra precio
+    // Verificar que estamos logueados yendo a un producto
     await page.goto('https://el-sembrador.com.ar/producto/almendra-non-pareil-27-30-importada/', { waitUntil: 'domcontentloaded', timeout: 20000 });
     await delay(2000);
-    const testPrecio = await page.evaluate(() => {
+
+    const test = await page.evaluate(() => {
       const txt = document.body?.innerText || '';
       const tieneVer = txt.includes('VER PRECIOS');
-      const tieneOferta = txt.includes('OFERTA');
-      // Buscar precio con formato $X.XXX.-
-      const match = txt.match(/\$\s*([\d.,]+)\.-/);
-      return { tieneVer, tieneOferta, precio: match ? match[1] : null, preview: txt.substring(0,300).replace(/\n/g,' ') };
+      const match = txt.match(/\$\s*([\d.]+)\.-/);
+      return { tieneVer, precio: match ? match[1] : null };
     });
-    console.log('  → Test precio almendra:', JSON.stringify(testPrecio));
 
-    const estaLogueado = !testPrecio.tieneVer && testPrecio.precio !== null;
-    console.log(estaLogueado ? '  ✓ Login OK - precios visibles' : '  ⚠ Login fallido - precios no visibles');
+    const estaLogueado = !test.tieneVer && test.precio !== null;
+    console.log(`  → Test: tieneVer=${test.tieneVer} precio=${test.precio}`);
+    console.log(estaLogueado ? '  ✓ Sesión activa - precios visibles' : '  ⚠ Sesión no activa - las cookies pueden haber expirado');
 
+    // ANALIZAR CADA PRODUCTO
     // ANALIZAR CADA PRODUCTO
     // ANALIZAR CADA PRODUCTO
     // ANALIZAR CADA PRODUCTO

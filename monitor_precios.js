@@ -89,6 +89,12 @@ async function leerPrecioProducto(page, url, cantidad_kg) {
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 });
     await delay(1500);
 
+    // Debug: ver qué página cargó realmente
+    const urlActual = page.url();
+    const preview = await page.evaluate(() => document.body?.innerText?.substring(0, 200)?.replace(/\n/g,' ') || '');
+    console.log(`    → URL: ${urlActual}`);
+    console.log(`    → Preview: ${preview}`);
+
     const datos = await page.evaluate((kg) => {
       const txt = document.body?.innerText || '';
 

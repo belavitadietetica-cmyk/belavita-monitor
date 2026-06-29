@@ -122,12 +122,22 @@ async function leerPrecioProducto(page, url, cantidad_kg) {
 
     const datos = await page.evaluate((kg) => {
       // Buscar precio del PRODUCTO ignorando el carrito del header
-      // El carrito aparece ANTES del h1, el precio del producto DESPUÉS
-
-      const h1 = document.querySelector('h1.product_title, h1, h2.product_title');
       const fullTxt = document.body?.innerText || '';
+      
+      // Detectar SIN EXISTENCIAS PRIMERO — si no hay stock no hay precio válido
+      const sinStock = fullTxt.includes('SIN EXISTENCIAS') || fullTxt.includes('sin existencias') || fullTxt.includes('Agotado');
+      
+      // Buscar el h1 del producto para ignorar el carrito
+      const h1 = document.querySelector('h1.product_title, h1, h2.product_title');
       const h1Text = (h1?.innerText || '').trim();
-      const h1Idx = h1Text ? fullTxt.indexOf(h1Text) : 0;
+      // El h1 aparece DOS veces en el texto (breadcrumb + título real)
+      // Buscar la segunda ocurrencia para evitar el breadcrumb
+      let h1Idx = 0;
+      if (h1Text) {
+        const first = fullTxt.indexOf(h1Text);
+        const second = fullTxt.indexOf(h1Text, first + h1Text.length);
+        h1Idx = second > 0 ? second : first;
+      }
       
       // Solo analizar texto desde el título del producto hacia abajo
       const txt = h1Idx > 0 ? fullTxt.substring(h1Idx) : fullTxt;
@@ -143,6 +153,9 @@ async function leerPrecioProducto(page, url, cantidad_kg) {
       const precios = [...txt.matchAll(/\$\s*([\d.]+)/g)]
         .map(m => ({ val: parseFloat(m[1].replace(/\./g,'')), raw: m[1] }))
         .filter(p => p.val > 1000 && p.val < 5000000);
+
+      // Si no hay stock, no hay precio válido
+      if (sinStock) return { precio_base: null, precio_normal: null, precio_oferta: null, precio_10kg: null, mejor_kgs: null, tiene_oferta: false, sin_stock: true, todos_precios: [] };
 
       if (!precios.length) return null;
 

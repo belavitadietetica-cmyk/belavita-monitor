@@ -133,6 +133,16 @@ async function monitorear() {
         await delay(1500);
 
         // Extraer productos y precios
+        // Debug: ver qué HTML devuelve la búsqueda
+        const htmlDebug = await page.content();
+        const tieneProductos = htmlDebug.includes('woocommerce-loop-product') || htmlDebug.includes('product-title') || htmlDebug.includes('type-product');
+        console.log(`  → HTML recibido: ${htmlDebug.length} chars · tiene productos: ${tieneProductos}`);
+        if (!tieneProductos) {
+          // Mostrar primeros 500 chars del body para ver qué hay
+          const bodyTxt = await page.evaluate(() => document.body?.innerText?.substring(0, 300) || 'sin body');
+          console.log(`  → Body preview: ${bodyTxt.replace(/\n/g,' ')}`);
+        }
+
         const productos = await page.evaluate((enfocar, cantidad_kg) => {
           const items = [];
           document.querySelectorAll('.product, li.product, .type-product').forEach(el => {

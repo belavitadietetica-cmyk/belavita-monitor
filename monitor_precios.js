@@ -116,8 +116,19 @@ async function leerPrecioProducto(page, url, cantidad_kg) {
       // Si falla el click, continuar igual
     }
 
-    // Capturar texto de la página ANTES del evaluate para evitar race conditions
-    const textoActual = await page.evaluate(() => document.body?.innerText || '');
+    // Capturar texto y verificar que corresponde al producto correcto
+    let textoActual = await page.evaluate(() => document.body?.innerText || '');
+    
+    // Si el texto no contiene parte de la URL del producto, esperar y reintentar
+    const slugEsperado = url.split('/producto/')[1]?.replace(/\//g,'').toUpperCase().replace(/-/g,' ');
+    const palabrasClave = slugEsperado?.split(' ').filter(p => p.length > 3) || [];
+    const textoContieneProducto = palabrasClave.some(p => textoActual.toUpperCase().includes(p));
+    
+    if (!textoContieneProducto && palabrasClave.length > 0) {
+      console.log(`    → Reintentando carga (texto no coincide con ${palabrasClave[0]})`);
+      await delay(2000);
+      textoActual = await page.evaluate(() => document.body?.innerText || '');
+    }
     
     const datos = await page.evaluate((kg, textoExterno) => {
       // Usar el texto capturado externamente para evitar race conditions
@@ -340,7 +351,7 @@ async function monitorear() {
         console.log(`    ${variante.es_principal ? '✓' : '·'} ${variante.label}: $${Math.round(precio).toLocaleString('es-AR')}/kg${datos.tiene_oferta ? ' 🔥' : ''}${sinStock ? ' (SIN STOCK)' : ''}`);
 
         resultados.push({ ...variante, datos, precio });
-        await delay(800);
+        await delay(2000);
       }
 
       if (!resultados.length) {

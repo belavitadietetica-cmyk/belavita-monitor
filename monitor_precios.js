@@ -225,11 +225,12 @@ async function monitorear() {
       const selectorUser = await page.$('input[name="log"]') ? 'input[name="log"]' : 'input[name="user_login"]';
       const selectorPass = await page.$('input[name="pwd"]') ? 'input[name="pwd"]' : 'input[name="user_pass"]';
       
+      // Usar type() de la página directamente sobre los selectores
       await page.click(selectorUser, { clickCount: 3 });
-      await page.keyboard.type(SEMBRADOR_USER, { delay: 80 });
+      await page.type(selectorUser, String(SEMBRADOR_USER), { delay: 80 });
       await delay(500);
       await page.click(selectorPass, { clickCount: 3 });
-      await page.keyboard.type(SEMBRADOR_PASS, { delay: 80 });
+      await page.type(selectorPass, String(SEMBRADOR_PASS), { delay: 80 });
       await delay(500);
 
       // Submit

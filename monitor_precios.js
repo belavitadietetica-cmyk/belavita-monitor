@@ -135,7 +135,34 @@ async function leerPrecioProducto(page, url, cantidad_kg) {
       const preciosMatch = [...txt.matchAll(/\$\s*([\d.]+)/g)];
       const precios = preciosMatch
         .map(m => parseFloat(m[1].replace(/\./g,'')))
-        .filter(p => p > 1000 && p < 10000000)
+        .filter(p => p > 1000 && p < 10000000);
+
+      if (!precios.length) return null;
+
+      const precioBase = Math.min(...precios);
+      const precioNormal = precios.length > 1 ? Math.max(...precios) : precioBase;
+      const precioOferta = tieneOferta && precios.length > 1 ? precioBase : null;
+
+      // Precio específico por cantidad — buscar "Xkg" cerca de un precio
+      let precioPorKg10 = null;
+      const txtLines = txt.split('\n');
+      for (let i = 0; i < txtLines.length; i++) {
+        if (txtLines[i].includes(String(kg)) && txtLines[i].toLowerCase().includes('kg')) {
+          for (let j = Math.max(0,i-3); j < Math.min(txtLines.length,i+5); j++) {
+            const pm = txtLines[j].match(/\$\s*([\d.]+)/);
+            if (pm) {
+              const p = parseFloat(pm[1].replace(/\./g,''));
+              if (p > 1000 && p < 10000000) { precioPorKg10 = p; break; }
+            }
+          }
+          if (precioPorKg10) break;
+        }
+      }
+
+      const mejorMatch = txt.match(/partir de[:\s]*([\d]+)\s*kg/i);
+      const mejorKgs = mejorMatch ? parseInt(mejorMatch[1]) : null;
+      const sinStock = txt.includes('sin existencias') || txt.includes('Agotado');
+
       return {
         precio_base: precioBase,
         precio_normal: precioNormal,

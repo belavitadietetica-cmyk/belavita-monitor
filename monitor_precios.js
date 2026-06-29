@@ -116,15 +116,12 @@ async function leerPrecioProducto(page, url, cantidad_kg) {
       // Si falla el click, continuar igual
     }
 
-    // Verificar URL actual antes de leer
-    const urlActual = page.url();
-    if (!urlActual.includes(url.split('/producto/')[1]?.replace('/',''))) {
-      console.log(`    ⚠ URL incorrecta: ${urlActual}`);
-    }
-
-    const datos = await page.evaluate((kg) => {
-      // Buscar precio del PRODUCTO ignorando el carrito del header
-      const fullTxt = document.body?.innerText || '';
+    // Capturar texto de la página ANTES del evaluate para evitar race conditions
+    const textoActual = await page.evaluate(() => document.body?.innerText || '');
+    
+    const datos = await page.evaluate((kg, textoExterno) => {
+      // Usar el texto capturado externamente para evitar race conditions
+      const fullTxt = textoExterno || document.body?.innerText || '';
       
       // Detectar SIN EXISTENCIAS PRIMERO — si no hay stock no hay precio válido
       const sinStock = fullTxt.includes('SIN EXISTENCIAS') || fullTxt.includes('sin existencias') || fullTxt.includes('Agotado');
@@ -202,7 +199,7 @@ async function leerPrecioProducto(page, url, cantidad_kg) {
         sin_stock: sinStock,
         todos_precios: precios,
       };
-    }, cantidad_kg);
+    }, cantidad_kg, textoActual);
 
     return datos;
   } catch(e) {

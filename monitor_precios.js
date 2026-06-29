@@ -213,49 +213,88 @@ async function monitorear() {
     console.log('\n📦 EL SEMBRADOR');
     console.log('  🔐 Logueando...');
 
-    // Ir a la página de login con espera completa
+    // Cargar página de login con networkidle2 para que cargue todo
     await page.goto('https://el-sembrador.com.ar/mi-cuenta/', { waitUntil: 'networkidle2', timeout: 40000 });
-    await delay(2000);
+    await delay(3000);
 
-    // Verificar si hay un campo de login visible
-    const hayLogin = await page.evaluate(() => !!document.querySelector('input[name="log"], input[name="user_login"]'));
-    
-    if (hayLogin) {
-      // Usar page.type() de Puppeteer directamente - más confiable que evaluate
-      const selectorUser = await page.$('input[name="log"]') ? 'input[name="log"]' : 'input[name="user_login"]';
-      const selectorPass = await page.$('input[name="pwd"]') ? 'input[name="pwd"]' : 'input[name="user_pass"]';
+    // Extraer el nonce de seguridad de WordPress
+    const nonce = await page.evaluate(() => {
+      // WordPress incluye un nonce en el form de login
+      const nonceField = document.querySelector('input[name="woocommerce-login-nonce"], input[name="_wpnonce"], input[name="woocommerce-reset-password-nonce"]');
+      return nonceField ? nonceField.value : null;
+    });
+    console.log('  → Nonce:', nonce ? nonce.substring(0,8)+'...' : 'no encontrado');
+
+    // Encontrar el formulario de login correcto
+    const formInfo = await page.evaluate(() => {
+      const forms = Array.from(document.querySelectorAll('form'));
+      for (const form of forms) {
+        const hasLog = form.querySelector('input[name="log"]');
+        const hasPwd = form.querySelector('input[name="pwd"]');
+        const hasSubmit = form.querySelector('input[type="submit"], button[type="submit"]');
+        if (hasLog && hasPwd) {
+          return {
+            action: form.action,
+            hasSubmit: !!hasSubmit,
+            submitText: hasSubmit ? (hasSubmit.value || hasSubmit.innerText) : null,
+            allInputs: Array.from(form.querySelectorAll('input')).map(i => ({name: i.name, type: i.type, value: i.type === 'hidden' ? i.value : ''}))
+          };
+        }
+      }
+      return null;
+    });
+    console.log('  → Form info:', JSON.stringify(formInfo));
+
+    if (formInfo) {
+      // Llenar y enviar el formulario paso a paso
+      await page.evaluate((user, pass) => {
+        const forms = Array.from(document.querySelectorAll('form'));
+        for (const form of forms) {
+          const cu = form.querySelector('input[name="log"]');
+          const cp = form.querySelector('input[name="pwd"]');
+          if (cu && cp) {
+            // Foco y disparo de eventos completos
+            cu.focus();
+            cu.value = '';
+            cu.value = user;
+            ['input','change','keyup','keydown'].forEach(e => cu.dispatchEvent(new Event(e, {bubbles:true})));
+            cp.focus();
+            cp.value = '';
+            cp.value = pass;
+            ['input','change','keyup','keydown'].forEach(e => cp.dispatchEvent(new Event(e, {bubbles:true})));
+            break;
+          }
+        }
+      }, SEMBRADOR_USER, SEMBRADOR_PASS);
       
-      // Usar type() de la página directamente sobre los selectores
-      await page.click(selectorUser, { clickCount: 3 });
-      await page.type(selectorUser, String(SEMBRADOR_USER), { delay: 80 });
-      await delay(500);
-      await page.click(selectorPass, { clickCount: 3 });
-      await page.type(selectorPass, String(SEMBRADOR_PASS), { delay: 80 });
-      await delay(500);
+      await delay(1000);
 
-      // Submit
+      // Click en submit y esperar navegación
       await Promise.all([
-        page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 20000 }),
-        page.keyboard.press('Enter'),
+        page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 25000 }),
+        page.evaluate(() => {
+          const forms = Array.from(document.querySelectorAll('form'));
+          for (const form of forms) {
+            if (form.querySelector('input[name="log"]')) {
+              const btn = form.querySelector('input[type="submit"], button[type="submit"]');
+              if (btn) { btn.click(); return; }
+              form.submit();
+              return;
+            }
+          }
+        })
       ]);
       await delay(2000);
     }
 
-    // Verificar estado del login
     const urlFinal = page.url();
-    const estadoTexto = await page.evaluate(() => document.body?.innerText?.substring(0, 200)?.replace(/\n/g,' ') || '');
-    const estaLogueado = !estadoTexto.includes('ERROR') && !estadoTexto.includes('incorrectos') && !urlFinal.includes('/dyl/');
-    
-    console.log('  → URL:', urlFinal);
-    console.log('  → Logueado:', estaLogueado);
-    if (!estaLogueado) console.log('  → Preview:', estadoTexto.substring(0, 100));
+    const previewFinal = await page.evaluate(() => document.body?.innerText?.substring(0,150)?.replace(/\n/g,' ') || '');
+    const estaLogueado = !previewFinal.includes('ERROR') && !previewFinal.includes('incorrectos') && !urlFinal.includes('/dyl/');
+    console.log('  → URL final:', urlFinal);
+    console.log('  → Preview:', previewFinal);
+    console.log(estaLogueado ? '  ✓ Login OK' : '  ⚠ Login fallido');
 
-    if (!estaLogueado) {
-      console.log('  ⚠ Login fallido - los precios no serán visibles');
-    } else {
-      console.log('  ✓ Login OK');
-    }
-
+    // ANALIZAR CADA PRODUCTO
     // ANALIZAR CADA PRODUCTO
     // ANALIZAR CADA PRODUCTO
     for (const prod_config of PRODUCTOS) {

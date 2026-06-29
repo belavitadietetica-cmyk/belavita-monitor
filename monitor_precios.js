@@ -188,7 +188,7 @@ async function leerPrecioProducto(page, url, cantidad_kg) {
 
       const mejorMatch = txt.match(/partir de[:\s]*([\d]+)\s*kg/i);
       const mejorKgs = mejorMatch ? parseInt(mejorMatch[1]) : null;
-      const sinStock = txt.includes('sin existencias') || txt.includes('Agotado');
+      // sinStock calculado arriba
 
       return {
         precio_base: precioBase,

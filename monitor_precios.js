@@ -140,17 +140,17 @@ async function leerPrecioProducto(page, url, cantidad_kg) {
       // Si hay oferta, aparece un segundo precio más bajo
 
       // Buscar todos los precios en el área del producto (>$1000)
-      const todosPrecios = [...txt.matchAll(/\$\s*([\d.]+)/g)]
+      const precios = [...txt.matchAll(/\$\s*([\d.]+)/g)]
         .map(m => ({ val: parseFloat(m[1].replace(/\./g,'')), raw: m[1] }))
         .filter(p => p.val > 1000 && p.val < 5000000);
 
-      if (!todosPrecios.length) return null;
+      if (!precios.length) return null;
 
       // El precio normal es el PRIMERO que aparece
-      const precioNormal = todosPrecios[0].val;
+      const precioNormal = precios[0].val;
       
       // Si hay oferta y un segundo precio distinto, ese es el precio con descuento
-      const segundoPrecio = todosPrecios.find(p => Math.abs(p.val - precioNormal) > 100);
+      const segundoPrecio = precios.find(p => Math.abs(p.val - precioNormal) > 100);
       const precioOferta = tieneOferta && segundoPrecio && segundoPrecio.val < precioNormal 
         ? segundoPrecio.val : null;
       

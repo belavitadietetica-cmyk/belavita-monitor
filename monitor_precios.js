@@ -122,11 +122,12 @@ async function leerPrecioProducto(page, url, cantidad_kg) {
       // Detectar si está en oferta
       const tieneOferta = txt.includes('OFERTA') || txt.includes('oferta') || !!document.querySelector('ins');
 
-      // Extraer todos los precios con formato $X.XXX.-
-      const preciosMatch = [...txt.matchAll(/\$\s*([\d.,]+)\.-/g)];
+      // Extraer todos los precios — formato $X.XXX o $X.XXX.-
+      const preciosMatch = [...txt.matchAll(/\$\s*([\d.]+(?:,\d+)?)/g)];
       const precios = preciosMatch
         .map(m => parseFloat(m[1].replace(/\./g,'').replace(',','.')))
         .filter(p => p > 100 && p < 10000000);
+      console.log && console.log('precios encontrados:', precios.slice(0,5));
 
       if (!precios.length) return null;
 
@@ -136,8 +137,22 @@ async function leerPrecioProducto(page, url, cantidad_kg) {
       const precioOferta = tieneOferta && precios.length > 1 ? precioBase : null;
 
       // Buscar precio específico por cantidad (ej: "10 kg ($17.896 x kg)")
-      const kgMatch = txt.match(new RegExp(`${kg}\\s*kg?[^)]*\\$\\s*([\\d.,]+)\\s*x\\s*kg`, 'i'));
-      const precioPorKg10 = kgMatch ? parseFloat(kgMatch[1].replace(/\./g,'').replace(',','.')) : null;
+      // Buscar precio por cantidad — formato: "10 kgs" cerca de "$ X.XXX"
+      const txtLines = txt.split('\n');
+      let precioPorKg10 = null;
+      for (let i = 0; i < txtLines.length; i++) {
+        if (txtLines[i].includes(String(kg)) && txtLines[i].toLowerCase().includes('kg')) {
+          // Buscar precio en líneas cercanas
+          for (let j = Math.max(0,i-3); j < Math.min(txtLines.length, i+5); j++) {
+            const pm = txtLines[j].match(/\$\s*([\d.]+)/);
+            if (pm) {
+              const p = parseFloat(pm[1].replace(/\./g,''));
+              if (p > 100 && p < 10000000) { precioPorKg10 = p; break; }
+            }
+          }
+          if (precioPorKg10) break;
+        }
+      }
 
       // Mejor precio a partir de X kgs
       const mejorMatch = txt.match(/partir de[:\s]*([\d]+)\s*kg/i);

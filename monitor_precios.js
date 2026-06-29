@@ -116,6 +116,10 @@ async function leerPrecioProducto(page, url, cantidad_kg) {
       // Si falla el click, continuar igual
     }
 
+    // Log del texto real de la página para debug
+    const previewTexto = await page.evaluate(() => document.body?.innerText?.substring(0,500)?.replace(/\n/g,' ') || '');
+    console.log(`    → Texto: ${previewTexto}`);
+
     const datos = await page.evaluate((kg) => {
       // Buscar precio del PRODUCTO ignorando el carrito del header
       // El carrito aparece ANTES del h1, el precio del producto DESPUÉS

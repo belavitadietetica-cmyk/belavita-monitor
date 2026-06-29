@@ -83,66 +83,77 @@ async function loginSembrador(page) {
     await page.goto('https://el-sembrador.com.ar/mi-cuenta/', { waitUntil: 'domcontentloaded', timeout: 40000 });
     await delay(3000);
 
-    // Intentar múltiples selectores posibles para el campo usuario
-    const selectoresUser = ['#user_login', '#username', 'input[name="username"]', 'input[name="log"]', 'input[type="text"]'];
-    const selectoresPass = ['#user_pass', '#password', 'input[name="password"]', 'input[name="pwd"]', 'input[type="password"]'];
-    const selectoresBtn  = ['#wp-submit', 'button[type="submit"]', 'input[type="submit"]', '.woocommerce-Button'];
+    // La página tiene 2 formularios: registro (arriba) y login (abajo con botón ACCEDER)
+    // Usamos evaluate para operar directamente sobre el DOM correcto
+    const resultado = await page.evaluate((user, pass) => {
+      const forms = Array.from(document.querySelectorAll('form'));
+      let loginForm = null;
 
-    let campoUser = null;
-    for (const sel of selectoresUser) {
-      campoUser = await page.$(sel);
-      if (campoUser) { console.log(`  → Campo usuario: ${sel}`); break; }
-    }
+      // Buscar el form que tenga el botón ACCEDER
+      for (const form of forms) {
+        const btns = form.querySelectorAll('button, input[type="submit"]');
+        for (const btn of btns) {
+          const txt = (btn.value || btn.innerText || btn.textContent || '').toLowerCase();
+          if (txt.includes('acced') || txt.includes('ingresar') || txt.includes('entrar')) {
+            loginForm = form;
+            break;
+          }
+        }
+        if (loginForm) break;
+      }
 
-    let campoPass = null;
-    for (const sel of selectoresPass) {
-      campoPass = await page.$(sel);
-      if (campoPass) { console.log(`  → Campo contraseña: ${sel}`); break; }
-    }
+      // Fallback: buscar por campo log/pwd
+      if (!loginForm) {
+        for (const form of forms) {
+          if (form.querySelector('input[name="log"]') || form.querySelector('input[name="user_login"]')) {
+            loginForm = form;
+            break;
+          }
+        }
+      }
 
-    if (!campoUser || !campoPass) {
-      // Guardar screenshot para debug
-      console.log('  ⚠ Formulario no encontrado. URL actual:', page.url());
-      console.log('  → Continuando sin login (precios públicos)');
+      if (!loginForm) return { ok: false, error: 'SIN_FORM' };
+
+      const campoUser = loginForm.querySelector('input[name="log"], input[name="user_login"], input[type="text"]');
+      const campoPass = loginForm.querySelector('input[name="pwd"], input[name="user_pass"], input[type="password"]');
+
+      if (!campoUser || !campoPass) return { ok: false, error: 'SIN_CAMPOS' };
+
+      campoUser.value = user;
+      campoUser.dispatchEvent(new Event('input', { bubbles: true }));
+      campoUser.dispatchEvent(new Event('change', { bubbles: true }));
+
+      campoPass.value = pass;
+      campoPass.dispatchEvent(new Event('input', { bubbles: true }));
+      campoPass.dispatchEvent(new Event('change', { bubbles: true }));
+
+      const btnSubmit = loginForm.querySelector('button[type="submit"], input[type="submit"]');
+      if (btnSubmit) btnSubmit.click();
+
+      return { ok: true, error: null };
+    }, SEMBRADOR_USER, SEMBRADOR_PASS);
+
+    console.log('  → evaluate:', JSON.stringify(resultado));
+
+    if (!resultado.ok) {
+      console.log('  ⚠ No se pudo completar el login:', resultado.error);
       return false;
     }
 
-    // Limpiar y escribir con evaluate para evitar problemas con .type()
-    await campoUser.click({ clickCount: 3 });
-    await page.keyboard.type(SEMBRADOR_USER, { delay: 60 });
-    await campoPass.click({ clickCount: 3 });
-    await page.keyboard.type(SEMBRADOR_PASS, { delay: 60 });
-
-    // Buscar botón de submit
-    let btnSubmit = null;
-    for (const sel of selectoresBtn) {
-      btnSubmit = await page.$(sel);
-      if (btnSubmit) { console.log(`  → Botón login: ${sel}`); break; }
-    }
-
-    if (btnSubmit) {
-      await Promise.all([
-        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 25000 }),
-        btnSubmit.click(),
-      ]);
-    }
-
+    await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 25000 }).catch(() => {});
     await delay(2000);
+
     const urlFinal = page.url();
-    const ok = !urlFinal.includes('login') && (urlFinal.includes('mi-cuenta') || urlFinal.includes('sembrador'));
-    console.log(ok ? `  ✓ Login OK · ${urlFinal}` : `  ⚠ Login incierto · ${urlFinal}`);
+    const ok = !urlFinal.includes('/mi-cuenta/?') && urlFinal.includes('sembrador');
+    console.log(ok ? '  ✓ Login OK' : '  ⚠ Login incierto · ' + urlFinal);
     return ok;
 
   } catch(e) {
     console.log('  ⚠ Error en login:', e.message);
-    console.log('  → Continuando sin login');
     return false;
   }
 }
 
-// ═══════════════════════════════════════════════════════
-// BUSCAR PRODUCTO EN TIENDA MAYORISTA
-// ═══════════════════════════════════════════════════════
 async function buscarProducto(page, config) {
   console.log(`\n  🔍 Buscando: "${config.buscar}"`);
 

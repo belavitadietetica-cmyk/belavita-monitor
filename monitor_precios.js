@@ -116,10 +116,6 @@ async function leerPrecioProducto(page, url, cantidad_kg) {
       // Si falla el click, continuar igual
     }
 
-    // Log del texto real de la página para debug
-    const previewTexto = await page.evaluate(() => document.body?.innerText?.substring(0,500)?.replace(/\n/g,' ') || '');
-    console.log(`    → Texto: ${previewTexto}`);
-
     const datos = await page.evaluate((kg) => {
       // Buscar precio del PRODUCTO ignorando el carrito del header
       const fullTxt = document.body?.innerText || '';
@@ -372,18 +368,21 @@ async function monitorear() {
       let hayNovedades = false;
       for (const r of resultados) {
         const tag = r.es_principal ? '✓' : '·';
+        if (r.datos.sin_stock) {
+          lineas.push(`  ${tag} ${r.label}: sin stock`);
+          continue;
+        }
         const oferta = r.datos.tiene_oferta ? ' 🔥 OFERTA' : '';
-        const stock = r.datos.sin_stock ? ' (sin stock)' : '';
         const mejor = r.datos.mejor_kgs ? ` · mejor desde ${r.datos.mejor_kgs}kg` : '';
         const precio10 = r.datos.precio_10kg ? ` · ${prod_config.cantidad_kg}kg = $${Math.round(r.datos.precio_10kg * prod_config.cantidad_kg).toLocaleString('es-AR')} ($${Math.round(r.datos.precio_10kg).toLocaleString('es-AR')}/kg)` : '';
-        lineas.push(`  ${tag} ${r.label}: $${Math.round(r.precio).toLocaleString('es-AR')}/kg${precio10}${oferta}${stock}${mejor}`);
+        lineas.push(`  ${tag} ${r.label}: $${Math.round(r.precio).toLocaleString('es-AR')}/kg${precio10}${oferta}${mejor}`);
         if (r.datos.tiene_oferta || r.datos.sin_stock) hayNovedades = true;
       }
 
       lineas.push('');
 
-      // Guardar precio principal en Supabase
-      if (prod?.id && precioActual) {
+      // Guardar precio principal en Supabase (solo si hay precio real)
+      if (prod?.id && precioActual && precioActual > 0) {
         const { error } = await sb.schema('ops').from('precios_historico').insert({
           producto_id: prod.id,
           proveedor_id: provMap['El Sembrador'],

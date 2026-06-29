@@ -212,92 +212,50 @@ async function monitorear() {
     // LOGIN
     console.log('\n📦 EL SEMBRADOR');
     console.log('  🔐 Logueando...');
-    await page.goto('https://el-sembrador.com.ar/mi-cuenta/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+
+    // Ir a la página de login con espera completa
+    await page.goto('https://el-sembrador.com.ar/mi-cuenta/', { waitUntil: 'networkidle2', timeout: 40000 });
     await delay(2000);
 
-    await page.evaluate((user, pass) => {
-      const forms = Array.from(document.querySelectorAll('form'));
-      let loginForm = null;
-      for (const form of forms) {
-        const btns = form.querySelectorAll('button, input[type="submit"]');
-        for (const btn of btns) {
-          const txt = (btn.value || btn.innerText || btn.textContent || '').toLowerCase();
-          if (txt.includes('acced') || txt.includes('ingresar')) { loginForm = form; break; }
-        }
-        if (loginForm) break;
-      }
-      if (!loginForm) {
-        for (const form of forms) {
-          if (form.querySelector('input[name="log"]')) { loginForm = form; break; }
-        }
-      }
-      if (!loginForm) return;
-      const cu = loginForm.querySelector('input[name="log"], input[type="text"]');
-      const cp = loginForm.querySelector('input[name="pwd"], input[type="password"]');
-      if (!cu || !cp) return;
-      cu.value = user;
-      cu.dispatchEvent(new Event('input', { bubbles: true }));
-      cp.value = pass;
-      cp.dispatchEvent(new Event('input', { bubbles: true }));
-      const btn = loginForm.querySelector('button[type="submit"], input[type="submit"]');
-      if (btn) btn.click();
-    }, SEMBRADOR_USER, SEMBRADOR_PASS);
+    // Verificar si hay un campo de login visible
+    const hayLogin = await page.evaluate(() => !!document.querySelector('input[name="log"], input[name="user_login"]'));
+    
+    if (hayLogin) {
+      // Usar page.type() de Puppeteer directamente - más confiable que evaluate
+      const selectorUser = await page.$('input[name="log"]') ? 'input[name="log"]' : 'input[name="user_login"]';
+      const selectorPass = await page.$('input[name="pwd"]') ? 'input[name="pwd"]' : 'input[name="user_pass"]';
+      
+      await page.click(selectorUser, { clickCount: 3 });
+      await page.keyboard.type(SEMBRADOR_USER, { delay: 80 });
+      await delay(500);
+      await page.click(selectorPass, { clickCount: 3 });
+      await page.keyboard.type(SEMBRADOR_PASS, { delay: 80 });
+      await delay(500);
 
-    await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
-    await delay(2000);
-
-    // Verificar si realmente está logueado
-    const estadoLogin = await page.evaluate(() => {
-      const txt = document.body?.innerText || '';
-      const url = window.location.href;
-      const estaLogueado = txt.includes('Mi cuenta') && !txt.includes('Nombre de usuario') && !txt.includes('Contraseña');
-      return { url, logueado: estaLogueado, preview: txt.substring(0, 150).replace(/\n/g,' ') };
-    });
-    console.log('  → Estado login:', JSON.stringify(estadoLogin));
-
-    if (!estadoLogin.logueado) {
-      // Intentar login directo via POST con fetch
-      console.log('  → Login no detectado, reintentando con waitForSelector...');
-      try {
-        await page.goto('https://el-sembrador.com.ar/mi-cuenta/', { waitUntil: 'networkidle2', timeout: 30000 });
-        await delay(3000);
-        
-        // Esperar que aparezca el form de login
-        await page.waitForFunction(() => {
-          const forms = document.querySelectorAll('form');
-          for (const f of forms) {
-            if (f.querySelector('input[name="log"]') || f.querySelector('input[name="pwd"]')) return true;
-          }
-          return false;
-        }, { timeout: 10000 });
-
-        await page.evaluate((user, pass) => {
-          const forms = Array.from(document.querySelectorAll('form'));
-          let loginForm = null;
-          for (const form of forms) {
-            if (form.querySelector('input[name="log"]') || form.querySelector('input[name="pwd"]')) {
-              loginForm = form; break;
-            }
-          }
-          if (!loginForm) return;
-          const cu = loginForm.querySelector('input[name="log"]');
-          const cp = loginForm.querySelector('input[name="pwd"]');
-          if (cu) { cu.value = user; cu.dispatchEvent(new Event('input', {bubbles:true})); }
-          if (cp) { cp.value = pass; cp.dispatchEvent(new Event('input', {bubbles:true})); }
-          const btn = loginForm.querySelector('button[type="submit"], input[type="submit"]');
-          if (btn) btn.click();
-        }, SEMBRADOR_USER, SEMBRADOR_PASS);
-
-        await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 20000 }).catch(() => {});
-        await delay(2000);
-        const urlPost = page.url();
-        console.log('  → URL post-login:', urlPost);
-      } catch(e2) {
-        console.log('  → Reintento falló:', e2.message);
-      }
+      // Submit
+      await Promise.all([
+        page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 20000 }),
+        page.keyboard.press('Enter'),
+      ]);
+      await delay(2000);
     }
-    console.log('  ✓ Login completado');
 
+    // Verificar estado del login
+    const urlFinal = page.url();
+    const estadoTexto = await page.evaluate(() => document.body?.innerText?.substring(0, 200)?.replace(/\n/g,' ') || '');
+    const estaLogueado = !estadoTexto.includes('ERROR') && !estadoTexto.includes('incorrectos') && !urlFinal.includes('/dyl/');
+    
+    console.log('  → URL:', urlFinal);
+    console.log('  → Logueado:', estaLogueado);
+    if (!estaLogueado) console.log('  → Preview:', estadoTexto.substring(0, 100));
+
+    if (!estaLogueado) {
+      console.log('  ⚠ Login fallido - los precios no serán visibles');
+    } else {
+      console.log('  ✓ Login OK');
+    }
+
+    // ANALIZAR CADA PRODUCTO
     // ANALIZAR CADA PRODUCTO
     for (const prod_config of PRODUCTOS) {
       console.log(`\n  🌿 ${prod_config.nombre_db}`);

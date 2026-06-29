@@ -73,7 +73,8 @@ async function monitorear() {
     await page.setRequestInterception(true);
     page.on('request', req => {
       const tipo = req.resourceType();
-      if (['image', 'font', 'media', 'stylesheet'].includes(tipo)) {
+      // Solo bloquear imágenes y fuentes, permitir scripts para que carguen los productos
+      if (['image', 'font', 'media'].includes(tipo)) {
         req.abort();
       } else {
         req.continue();
@@ -221,13 +222,15 @@ async function monitorear() {
 
         // Guardar precio en Supabase
         if (prod?.id && precioActual) {
-          await sb.schema('ops').from('precios_historico').insert({
+          const precioRes = await sb.schema('ops').from('precios_historico').insert({
             producto_id: prod.id,
             proveedor_id: provMap['El Sembrador'],
             precio_sin_iva: precioActual,
             fuente: 'agente',
             ahorro_vs_anterior: ultimoPrecio ? ultimoPrecio - precioActual : 0,
-          }).then(r => { if (r.error) console.log('  ⚠ Error guardando precio:', r.error.message); });
+          });
+          if (precioRes.error) console.log('  ⚠ Error guardando precio:', precioRes.error.message);
+          else console.log(`  ✓ Precio guardado: $${Math.round(precioActual).toLocaleString('es-AR')}/kg`);
         }
 
         await delay(800);
@@ -265,12 +268,13 @@ async function monitorear() {
   }
 
   // Registrar ejecución
-  await sb.schema('ops').from('monitoreo_precios').insert({
+  const monRes = await sb.schema('ops').from('monitoreo_precios').insert({
     proveedor_id: provMap['El Sembrador'],
     productos_revisados: BUSQUEDAS.length,
     alerta_generada: true,
     fecha_ejecucion: new Date().toISOString(),
-  }).catch(e => console.log('⚠ monitoreo_precios:', e.message));
+  });
+  if (monRes.error) console.log('⚠ monitoreo_precios:', monRes.error.message);
 
   console.log('\n✅ Monitoreo completado');
   console.log('═'.repeat(55));

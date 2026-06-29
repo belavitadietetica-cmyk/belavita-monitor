@@ -158,7 +158,7 @@ async function buscarProducto(page, config) {
   console.log(`\n  🔍 Buscando: "${config.buscar}"`);
 
   // Ir a la tienda mayorista con búsqueda
-  const url = `https://el-sembrador.com.ar/tienda/?s=${encodeURIComponent(config.buscar)}&post_type=product`;
+  const url = `https://el-sembrador.com.ar/tienda-mayorista/?s=${encodeURIComponent(config.buscar)}&post_type=product`;
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 });
   await delay(1500);
 
@@ -289,7 +289,7 @@ async function buscarProducto(page, config) {
 async function scrapeOfertasSemana(page) {
   console.log('\n  🏷️ Revisando ofertas de la semana...');
   try {
-    await page.goto('https://el-sembrador.com.ar/tienda/', { waitUntil: 'domcontentloaded', timeout: 20000 });
+    await page.goto('https://el-sembrador.com.ar/tienda-mayorista/', { waitUntil: 'domcontentloaded', timeout: 20000 });
     await delay(2000);
 
     const ofertas = await page.evaluate(() => {
@@ -491,17 +491,37 @@ async function monitorear() {
     const reporte = await generarReporte(resultadosPorProducto, ofertas, ultimosPrecios);
     console.log('\n' + reporte);
 
-    // Guardar reporte como alerta para Lucas
+    // Guardar reporte como alerta para Lucas (siempre, aunque sea parcial)
     const prodAlmendra = findProd('Almendras Non Pareil');
+    const reporteFinal = reporte || '⚠ El análisis no encontró datos. Verificar conexión con El Sembrador.';
     await sb.schema('ops').from('alertas').insert({
       producto_id: prodAlmendra?.id || null,
       tipo: 'analisis_proveedor',
-      mensaje: reporte,
-      datos: { productos_analizados: PRODUCTOS_SEMBRADOR.length, ofertas: ofertas.length },
+      mensaje: reporteFinal,
+      datos: {
+        productos_analizados: PRODUCTOS_SEMBRADOR.length,
+        ofertas: ofertas.length,
+        estado: reporte ? 'completo' : 'sin_datos',
+        fecha: new Date().toISOString(),
+      },
     });
+    console.log('  ✓ Reporte guardado en alertas para Lucas');
 
+  } catch(eGeneral) {
+    console.log('❌ Error general en monitoreo:', eGeneral.message);
+    // Guardar alerta de error para que la app lo muestre igual
+    try {
+      const prodAlmendra = findProd('Almendras Non Pareil');
+      await sb.schema('ops').from('alertas').insert({
+        producto_id: prodAlmendra?.id || null,
+        tipo: 'analisis_proveedor',
+        mensaje: `⚠ Error en el monitoreo: ${eGeneral.message}
+Se guardará el análisis parcial si hubo datos.`,
+        datos: { error: eGeneral.message },
+      });
+    } catch(e2) { console.log('Error guardando alerta:', e2.message); }
   } finally {
-    if (browser) await browser.close();
+    if (browser) { try { await browser.close(); } catch(e) {} }
   }
 
   await sb.schema('ops').from('monitoreo_precios').insert({

@@ -6,6 +6,25 @@ const SEMBRADOR_USER = process.env.SEMBRADOR_USER;
 const SEMBRADOR_PASS = process.env.SEMBRADOR_PASS;
 const delay = ms => new Promise(r => setTimeout(r, ms));
 
+// Navega a una URL detectando "HTTP ERROR 429" (rate limit). Si lo detecta,
+// espera un enfriamiento y reintenta una vez antes de rendirse.
+async function gotoConReintento(page, url, opts = {}) {
+  const waitUntil = opts.waitUntil || 'domcontentloaded';
+  const timeout = opts.timeout || 20000;
+  for (let intento = 1; intento <= 2; intento++) {
+    await page.goto(url, { waitUntil, timeout });
+    const es429 = await page.evaluate(() => /HTTP ERROR 429|This page isn.t working/i.test(document.body?.innerText || ''));
+    if (!es429) return true;
+    if (intento === 1) {
+      console.log(`    ⏳ HTTP 429 (demasiadas solicitudes) en ${url} · esperando 12s y reintentando...`);
+      await delay(12000);
+    } else {
+      console.log(`    ⚠ Sigue en 429 tras reintentar: ${url}`);
+    }
+  }
+  return false;
+}
+
 // ═══════════════════════════════════════════════════════
 // PRODUCTOS A MONITOREAR — EL SEMBRADOR — URLs exactas
 // ═══════════════════════════════════════════════════════
@@ -146,7 +165,8 @@ const PRODUCTOS_MOLY = [
 // ═══════════════════════════════════════════════════════
 async function leerPrecioProducto(page, url, cantidad_kg) {
   try {
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 });
+    const ok = await gotoConReintento(page, url, { waitUntil: 'domcontentloaded', timeout: 20000 });
+    if (!ok) return null;
     await delay(1500);
 
     // Clickear "VER PRECIOS" usando Puppeteer directamente
@@ -289,7 +309,8 @@ async function leerPrecioProducto(page, url, cantidad_kg) {
 // ═══════════════════════════════════════════════════════
 async function leerPrecioMoly(page, url, pesoObjetivo) {
   try {
-    await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
+    const ok = await gotoConReintento(page, url, { waitUntil: 'networkidle2', timeout: 30000 });
+    if (!ok) return null;
     await delay(1500);
 
     // Diagnóstico: título de la página + preview del texto visible
@@ -513,7 +534,7 @@ async function monitorear() {
         console.log(`    ${variante.es_principal ? '✓' : '·'} ${variante.label}: $${Math.round(precio).toLocaleString('es-AR')}/kg${datos.tiene_oferta ? ' 🔥' : ''}${sinStock ? ' (SIN STOCK)' : ''}`);
 
         resultados.push({ ...variante, datos, precio });
-        await delay(2000);
+        await delay(4000);
       }
 
       if (!resultados.length) {
@@ -614,7 +635,7 @@ async function monitorear() {
             const precioKg = Math.round((precioTotal / kgNum) * 100) / 100;
             console.log(`    ${variante.es_principal ? '✓' : '·'} ${variante.label} (${peso}): $${Math.round(precioTotal).toLocaleString('es-AR')} total ($${Math.round(precioKg).toLocaleString('es-AR')}/kg)`);
             resultados.push({ ...variante, precioTotal, precioKg });
-            await delay(1500);
+            await delay(3500);
           }
 
           if (!resultados.length) {

@@ -516,6 +516,7 @@ async function monitorear() {
 
       // Obtener último precio guardado
       const prod = findProd(prod_config.nombre_db);
+      console.log(`    → producto en DB: ${prod ? `"${prod.nombre}" (id=${prod.id})` : 'NO ENCONTRADO ⚠'}`);
       let ultimoPrecio = null;
       if (prod?.id) {
         const { data: ult } = await sb.schema('ops').from('precios_historico')
@@ -613,6 +614,7 @@ async function monitorear() {
         lineasMoly.push(`🌿 ${prod_config.nombre_db.toUpperCase()}`);
 
         const prod = findProd(prod_config.nombre_db);
+        console.log(`    → producto en DB: ${prod ? `"${prod.nombre}" (id=${prod.id})` : 'NO ENCONTRADO ⚠'}`);
 
         // Para cada peso objetivo del producto (ej. Harina de Coco pide 5kg Y 10kg)
         for (const peso of prod_config.pesos_objetivo) {

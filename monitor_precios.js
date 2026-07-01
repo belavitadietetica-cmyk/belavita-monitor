@@ -232,20 +232,55 @@ async function leerCatalogoBernal(page) {
   const ok = await gotoConReintento(page, BERNAL_URL, { waitUntil: 'networkidle2', timeout: 40000 });
   if (!ok) return null;
   await delay(2000);
-  const texto = await page.evaluate(() => document.body?.innerText || '');
+  let texto = await page.evaluate(() => document.body?.innerText || '');
   console.log(`    → catálogo cargado · ${texto.length} caracteres`);
+
+  // Si "Frutos Secos" no aparece todavía, probablemente el catálogo es de scroll
+  // infinito/lazy-load y hace falta bajar la página para que renderice esa sección
+  if (!texto.includes('Frutos Secos')) {
+    console.log('    → "Frutos Secos" no apareció aún · haciendo scroll para forzar carga...');
+    for (let i = 0; i < 15; i++) {
+      await page.evaluate(() => window.scrollBy(0, window.innerHeight * 3));
+      await delay(600);
+      const tieneAhora = await page.evaluate(() => document.body?.innerText?.includes('Frutos Secos') || false);
+      if (tieneAhora) { console.log(`    → apareció tras ${i + 1} scrolls`); break; }
+    }
+    await delay(1000);
+    texto = await page.evaluate(() => document.body?.innerText || '');
+    console.log(`    → catálogo tras scroll · ${texto.length} caracteres · tiene "Frutos Secos"=${texto.includes('Frutos Secos')}`);
+  }
+
   return texto;
 }
 
-// Busca el precio de un producto puntual dentro del texto del catálogo,
-// matcheando el nombre exacto tal como aparece antes del " | $ precio"
+// Busca el precio de un producto puntual dentro del texto del catálogo.
+// No depende de un separador exacto entre nombre y precio (busca el
+// primer "$ monto" dentro de una ventana de texto después del nombre).
+// Soporta formato US (1,234.56) y formato AR (1.234,56).
 function buscarPrecioBernal(texto, nombreBuscar) {
   if (!texto) return null;
-  const escapado = nombreBuscar.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const regex = new RegExp(escapado + '\\s*\\|\\s*\\$\\s*([\\d,]+\\.\\d{2})', 'i');
-  const m = texto.match(regex);
-  if (!m) return null;
-  const precio = parseFloat(m[1].replace(/,/g, ''));
+  const idx = texto.toLowerCase().indexOf(nombreBuscar.toLowerCase());
+  if (idx === -1) {
+    console.log(`    ⚠ "${nombreBuscar}" no aparece en el texto del catálogo`);
+    return null;
+  }
+  const ventana = texto.substring(idx, idx + nombreBuscar.length + 80);
+  const m = ventana.match(/\$\s*([\d.,]+)/);
+  if (!m) {
+    console.log(`    ⚠ "${nombreBuscar}" encontrado pero sin precio cerca: "${ventana.replace(/\n/g, ' ')}"`);
+    return null;
+  }
+  const raw = m[1];
+  const lastComma = raw.lastIndexOf(',');
+  const lastDot = raw.lastIndexOf('.');
+  let precio;
+  if (lastComma > lastDot) {
+    // formato 1.234,56 → la coma es el separador decimal
+    precio = parseFloat(raw.replace(/\./g, '').replace(',', '.'));
+  } else {
+    // formato 1,234.56 → el punto es el separador decimal
+    precio = parseFloat(raw.replace(/,/g, ''));
+  }
   if (!precio || precio <= 0) return null;
   return precio;
 }

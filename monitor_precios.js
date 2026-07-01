@@ -160,6 +160,97 @@ const PRODUCTOS_MOLY = [
 ];
 
 // ═══════════════════════════════════════════════════════
+// PRODUCTOS A MONITOREAR — BERNAL
+// Catálogo de una sola página (sin login, sin URLs individuales).
+// Se lee el texto completo una vez y se busca cada producto
+// por nombre exacto tal como aparece en el catálogo.
+// Chía suelta y Psyllium: no encontrados en el catálogo — excluidos
+// (pendiente confirmar con Tomás si Bernal los vende).
+// ═══════════════════════════════════════════════════════
+const BERNAL_URL = 'https://gglobal.net.ar/bernal/?cliente';
+
+const PRODUCTOS_BERNAL = [
+  {
+    nombre_db: 'Almendras Non Pareil',
+    proveedor: 'Bernal',
+    principal: true,
+    items: [
+      { nombreBuscar: 'Almendra Nonpareil X 10 K', label: 'Nonpareil 10kg', pesoKg: 10, es_principal: true },
+      { nombreBuscar: 'Almendra Guara X 10 K', label: 'Guara 10kg (alternativa)', pesoKg: 10, es_principal: false },
+    ]
+  },
+  {
+    nombre_db: 'Nuez Mariposa',
+    proveedor: 'Bernal',
+    principal: true,
+    items: [
+      { nombreBuscar: 'Nuez Mariposa Light X 10 K', label: 'Mariposa Light 10kg', pesoKg: 10, es_principal: true },
+      { nombreBuscar: 'Nuez Mariposa Extra Light X 10 K', label: 'Mariposa Extra Light 10kg', pesoKg: 10, es_principal: true },
+      { nombreBuscar: 'Nuez Cuartos Extra Light X 10 K', label: 'Cuartos Extra Light 10kg', pesoKg: 10, es_principal: false },
+    ]
+  },
+  {
+    nombre_db: 'Harina de Coco',
+    proveedor: 'Bernal',
+    principal: true,
+    items: [
+      // Bernal no vende presentación de 10kg (solo 1K/5K/25K) — se reporta 5kg (pedido) y 25kg de referencia
+      { nombreBuscar: 'Harina De Coco Pura X 5 K', label: 'Harina de Coco Pura 5kg', pesoKg: 5, es_principal: true },
+      { nombreBuscar: 'Harina De Coco Pura X 25 K', label: 'Harina de Coco Pura 25kg', pesoKg: 25, es_principal: false },
+    ]
+  },
+  {
+    nombre_db: 'Chía',
+    proveedor: 'Bernal',
+    principal: true,
+    items: [
+      { nombreBuscar: 'Chia Premium X 25 K', label: 'Chía Premium 25kg', pesoKg: 25, es_principal: true },
+    ]
+  },
+  {
+    nombre_db: 'Manzanilla',
+    proveedor: 'Bernal',
+    principal: false,
+    items: [
+      { nombreBuscar: 'Manzanilla Flores Premium X 1 K', label: 'Flores Premium 1kg', pesoKg: 1, es_principal: true },
+    ]
+  },
+  {
+    // Bernal no vende Psyllium en 10kg — la presentación más grande es 1kg
+    nombre_db: 'Psyllium',
+    proveedor: 'Bernal',
+    principal: true,
+    items: [
+      { nombreBuscar: 'Psyllium En Semilla X 1 K', label: 'En Semilla 1kg', pesoKg: 1, es_principal: true },
+      { nombreBuscar: 'Psyllium En Polvo X 1 K', label: 'En Polvo 1kg', pesoKg: 1, es_principal: false },
+    ]
+  },
+];
+
+// Carga el catálogo completo de Bernal UNA vez y devuelve el texto plano de la página
+async function leerCatalogoBernal(page) {
+  const ok = await gotoConReintento(page, BERNAL_URL, { waitUntil: 'networkidle2', timeout: 40000 });
+  if (!ok) return null;
+  await delay(2000);
+  const texto = await page.evaluate(() => document.body?.innerText || '');
+  console.log(`    → catálogo cargado · ${texto.length} caracteres`);
+  return texto;
+}
+
+// Busca el precio de un producto puntual dentro del texto del catálogo,
+// matcheando el nombre exacto tal como aparece antes del " | $ precio"
+function buscarPrecioBernal(texto, nombreBuscar) {
+  if (!texto) return null;
+  const escapado = nombreBuscar.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const regex = new RegExp(escapado + '\\s*\\|\\s*\\$\\s*([\\d,]+\\.\\d{2})', 'i');
+  const m = texto.match(regex);
+  if (!m) return null;
+  const precio = parseFloat(m[1].replace(/,/g, ''));
+  if (!precio || precio <= 0) return null;
+  return precio;
+}
+
+// ═══════════════════════════════════════════════════════
 // LEER PRECIO DE UNA URL DE PRODUCTO — EL SEMBRADOR
 // ═══════════════════════════════════════════════════════
 async function leerPrecioProducto(page, url, cantidad_kg) {
@@ -692,6 +783,100 @@ async function monitorear() {
       });
       if (errAlertaMoly) console.log('❌ Error guardando alerta Moly Market:', JSON.stringify(errAlertaMoly));
       else console.log('✓ Reporte Moly Market guardado para Lucas');
+    }
+
+    // ═══════════════════════════════════════════════════
+    // BERNAL — catálogo de una sola página, sin login
+    // ═══════════════════════════════════════════════════
+    console.log('\n📦 BERNAL');
+
+    if (!provMap['Bernal']) {
+      console.log('  ⚠ No existe el proveedor "Bernal" en ops.proveedores — se omite el análisis');
+    } else {
+      const textoBernal = await leerCatalogoBernal(page);
+
+      if (!textoBernal) {
+        console.log('  ⚠ No se pudo cargar el catálogo de Bernal · se omite el análisis');
+      } else {
+        const lineasBernal = [];
+        lineasBernal.push(`📊 ANÁLISIS BERNAL · ${fecha}`);
+        lineasBernal.push('');
+
+        for (const prod_config of PRODUCTOS_BERNAL) {
+          console.log(`\n  🌿 ${prod_config.nombre_db}`);
+          lineasBernal.push(`🌿 ${prod_config.nombre_db.toUpperCase()}`);
+
+          const prod = findProd(prod_config.nombre_db);
+          console.log(`    → producto en DB: ${prod ? `"${prod.nombre}" (id=${prod.id})` : 'NO ENCONTRADO ⚠'}`);
+
+          let ultimoPrecioKg = null;
+          if (prod?.id) {
+            const { data: ult } = await sb.schema('ops').from('precios_historico')
+              .select('precio_sin_iva').eq('producto_id', prod.id)
+              .eq('proveedor_id', provMap['Bernal'])
+              .order('fecha_registro', { ascending: false }).limit(1).maybeSingle();
+            ultimoPrecioKg = ult?.precio_sin_iva;
+          }
+
+          const resultados = [];
+          for (const item of prod_config.items) {
+            const precioTotal = buscarPrecioBernal(textoBernal, item.nombreBuscar);
+            if (!precioTotal) {
+              console.log(`    ⚠ ${item.label}: no encontrado en el catálogo`);
+              continue;
+            }
+            const precioKg = Math.round((precioTotal / item.pesoKg) * 100) / 100;
+            console.log(`    ${item.es_principal ? '✓' : '·'} ${item.label}: $${Math.round(precioTotal).toLocaleString('es-AR')} total ($${Math.round(precioKg).toLocaleString('es-AR')}/kg)`);
+            resultados.push({ ...item, precioTotal, precioKg });
+          }
+
+          if (!resultados.length) {
+            lineasBernal.push('  ⚠ Sin datos disponibles');
+            lineasBernal.push('');
+            continue;
+          }
+
+          const principal = resultados.find(r => r.es_principal) || resultados[0];
+
+          if (ultimoPrecioKg && principal.precioKg) {
+            const pct = ((principal.precioKg - ultimoPrecioKg) / ultimoPrecioKg) * 100;
+            if (Math.abs(pct) >= 1) {
+              const sube = pct > 0;
+              lineasBernal.push(`  ${sube ? '📈' : '📉'} ${sube ? 'Subió' : 'Bajó'} ${Math.abs(pct).toFixed(1)}% vs última compra ($${Math.round(ultimoPrecioKg).toLocaleString('es-AR')}/kg)`);
+            } else {
+              lineasBernal.push('  = Precio estable');
+            }
+          }
+
+          for (const r of resultados) {
+            const tag = r.es_principal ? '✓' : '·';
+            lineasBernal.push(`  ${tag} ${r.label}: $${Math.round(r.precioTotal).toLocaleString('es-AR')} total ($${Math.round(r.precioKg).toLocaleString('es-AR')}/kg)`);
+          }
+          lineasBernal.push('');
+
+          if (prod?.id && principal.precioKg > 0) {
+            const { error } = await sb.schema('ops').from('precios_historico').insert({
+              producto_id: prod.id,
+              proveedor_id: provMap['Bernal'],
+              precio_sin_iva: principal.precioKg,
+              fuente: 'agente',
+              ahorro_vs_anterior: ultimoPrecioKg ? ultimoPrecioKg - principal.precioKg : 0,
+            });
+            if (error) console.log(`    ⚠ Error guardando precio: ${error.message}`);
+            else console.log(`    ✓ Precio guardado: $${Math.round(principal.precioKg).toLocaleString('es-AR')}/kg`);
+          }
+        }
+
+        const reporteBernal = lineasBernal.join('\n');
+        console.log('\n📋 Reporte Bernal:\n' + reporteBernal);
+        const { error: errAlertaBernal } = await sb.schema('ops').from('alertas').insert({
+          tipo: 'analisis_proveedor',
+          mensaje: reporteBernal,
+          datos: { fecha: new Date().toISOString(), proveedor: 'Bernal', productos: PRODUCTOS_BERNAL.length },
+        });
+        if (errAlertaBernal) console.log('❌ Error guardando alerta Bernal:', JSON.stringify(errAlertaBernal));
+        else console.log('✓ Reporte Bernal guardado para Lucas');
+      }
     }
 
   } catch(e) {

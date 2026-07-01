@@ -7,7 +7,7 @@ const SEMBRADOR_PASS = process.env.SEMBRADOR_PASS;
 const delay = ms => new Promise(r => setTimeout(r, ms));
 
 // ═══════════════════════════════════════════════════════
-// PRODUCTOS A MONITOREAR — URLs exactas
+// PRODUCTOS A MONITOREAR — EL SEMBRADOR — URLs exactas
 // ═══════════════════════════════════════════════════════
 const PRODUCTOS = [
   // ALMENDRAS
@@ -82,7 +82,67 @@ const PRODUCTOS = [
 ];
 
 // ═══════════════════════════════════════════════════════
-// LEER PRECIO DE UNA URL DE PRODUCTO
+// PRODUCTOS A MONITOREAR — MOLY MARKET — URLs exactas
+// No requiere login. Los precios son "en negro" (sin factura);
+// si se pide factura A, el sobreprecio (+10.5%) ya está
+// contemplado en la tabla de IVA por proveedor de la app.
+// ═══════════════════════════════════════════════════════
+const PRODUCTOS_MOLY = [
+  {
+    nombre_db: 'Almendras Non Pareil',
+    proveedor: 'Moly Market',
+    principal: true,
+    pesos_objetivo: ['10 kg'],
+    variantes: [
+      { url: 'https://www.molymarket.com.ar/product/almendra-non-pareil-mediana-importada/', label: 'Non Pareil Mediana Importada', es_principal: true },
+      { url: 'https://www.molymarket.com.ar/product/almendra-non-pareil-mediana/', label: 'Non Pareil Mediana', es_principal: true },
+      { url: 'https://www.molymarket.com.ar/product/almendra-guara-mediana/', label: 'Guara Mediana', es_principal: false },
+      { url: 'https://www.molymarket.com.ar/product/almendra-non-pareil-chile/', label: 'Non Pareil Chile', es_principal: false },
+    ]
+  },
+  {
+    nombre_db: 'Nuez Mariposa',
+    proveedor: 'Moly Market',
+    principal: true,
+    pesos_objetivo: ['10 kg'],
+    variantes: [
+      { url: 'https://www.molymarket.com.ar/product/nuez-mariposa-light-x10kg/', label: 'Mariposa Light', es_principal: true },
+      { url: 'https://www.molymarket.com.ar/product/nuez-mariposa-extra-light-10kg-procesada-a-mano/', label: 'Mariposa Extra Light (procesada a mano)', es_principal: true },
+      { url: 'https://www.molymarket.com.ar/product/nuez-cuartos-extra-light/', label: 'Cuartos Extra Light', es_principal: false },
+    ]
+  },
+  {
+    nombre_db: 'Chía',
+    proveedor: 'Moly Market',
+    principal: true,
+    pesos_objetivo: ['25 kg'],
+    variantes: [
+      { url: 'https://www.molymarket.com.ar/product/chia-aa/', label: 'Chía AA', es_principal: true },
+    ]
+  },
+  {
+    nombre_db: 'Harina de Coco',
+    proveedor: 'Moly Market',
+    principal: true,
+    pesos_objetivo: ['5 kg', '10 kg'],
+    variantes: [
+      { url: 'https://www.molymarket.com.ar/product/harina-de-coco-100-pura/', label: 'Harina de Coco 100% Pura', es_principal: true },
+    ]
+  },
+  {
+    nombre_db: 'Manzanilla',
+    proveedor: 'Moly Market',
+    principal: false,
+    pesos_objetivo: ['1 kg'],
+    variantes: [
+      { url: 'https://www.molymarket.com.ar/product/manzanilla-pura-flor/', label: 'Manzanilla Pura Flor', es_principal: true },
+    ]
+  },
+  // Psyllium: Moly Market no tiene ni semilla ni harina de psyllium — queda excluido
+];
+
+// ═══════════════════════════════════════════════════════
+// LEER PRECIO DE UNA URL DE PRODUCTO — EL SEMBRADOR
 // ═══════════════════════════════════════════════════════
 async function leerPrecioProducto(page, url, cantidad_kg) {
   try {
@@ -213,6 +273,89 @@ async function leerPrecioProducto(page, url, cantidad_kg) {
     }, cantidad_kg, textoActual);
 
     return datos;
+  } catch(e) {
+    console.log(`    ⚠ Error en ${url}: ${e.message}`);
+    return null;
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+// LEER PRECIO DE UNA URL DE PRODUCTO — MOLY MARKET
+// Sitio WooCommerce sin login. Algunos productos son
+// "variables" (dropdown de Peso: 250g/500g/1kg/5kg/10kg/25kg)
+// y otros son "simples" (peso fijo, ej. "...x10kg" en el slug).
+// Se maneja el peso pedido (pesoObjetivo, ej. "10 kg") en
+// ambos casos. Devuelve el precio TOTAL del bulto pedido.
+// ═══════════════════════════════════════════════════════
+async function leerPrecioMoly(page, url, pesoObjetivo) {
+  try {
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 });
+    await delay(1200);
+
+    // Chequear sin stock
+    const sinStock = await page.evaluate(() => {
+      const txt = document.body?.innerText || '';
+      return /SIN STOCK|AGOTADO/i.test(txt);
+    });
+    if (sinStock) return { precio: null, sin_stock: true };
+
+    // ¿Es un producto con variantes (selector de Peso)?
+    const tieneSelect = await page.evaluate(() => {
+      return !!document.querySelector('form.variations_form select, table.variations select, .variations select');
+    });
+
+    if (tieneSelect) {
+      // Buscar la opción cuyo texto matchea el peso objetivo (normalizado, sin espacios, minúscula)
+      const valorOpcion = await page.evaluate((pesoObjetivo) => {
+        const select = document.querySelector('form.variations_form select, table.variations select, .variations select');
+        if (!select) return null;
+        const normal = s => (s || '').toLowerCase().replace(/\s+/g, '').replace(',', '.');
+        const target = normal(pesoObjetivo);
+        for (const opt of select.options) {
+          const txt = normal(opt.textContent);
+          if (txt === target || txt === target.replace('kg', 'kg')) return opt.value;
+        }
+        // fallback: buscar coincidencia parcial (ej "10kg" dentro del texto)
+        for (const opt of select.options) {
+          if (normal(opt.textContent).includes(target.replace('kg', ''))) return opt.value;
+        }
+        return null;
+      }, pesoObjetivo);
+
+      if (!valorOpcion) {
+        console.log(`    ⚠ No se encontró la opción "${pesoObjetivo}" en el selector de ${url}`);
+        return { precio: null, sin_stock: false, no_encontrado: true };
+      }
+
+      const selectHandle = await page.$('form.variations_form select, table.variations select, .variations select');
+      await selectHandle.select(valorOpcion);
+      // Esperar a que WooCommerce actualice el precio de la variante (AJAX interno, sin recarga)
+      await delay(1500);
+    }
+
+    // Leer el precio visible. Preferir el precio de variante si quedó seleccionado.
+    const precio = await page.evaluate(() => {
+      const candidatos = [
+        '.woocommerce-variation-price .woocommerce-Price-amount',
+        '.woocommerce-variation-price .amount',
+        '.single_variation .woocommerce-Price-amount',
+        '.summary .price ins .woocommerce-Price-amount',
+        '.summary .price .woocommerce-Price-amount',
+        'p.price .woocommerce-Price-amount',
+        '.price .woocommerce-Price-amount',
+      ];
+      let el = null;
+      for (const sel of candidatos) {
+        el = document.querySelector(sel);
+        if (el) break;
+      }
+      const txt = el?.textContent || '';
+      const m = txt.match(/([\d.]+)/);
+      if (!m) return null;
+      return parseFloat(m[1].replace(/\./g, ''));
+    });
+
+    return { precio, sin_stock: false };
   } catch(e) {
     console.log(`    ⚠ Error en ${url}: ${e.message}`);
     return null;
@@ -409,6 +552,102 @@ async function monitorear() {
       }
     }
 
+    // ═══════════════════════════════════════════════════
+    // MOLY MARKET — no requiere login, se reutiliza el mismo browser
+    // ═══════════════════════════════════════════════════
+    console.log('\n📦 MOLY MARKET');
+
+    if (!provMap['Moly Market']) {
+      console.log('  ⚠ No existe el proveedor "Moly Market" en ops.proveedores — se omite el análisis');
+    } else {
+      const lineasMoly = [];
+      lineasMoly.push(`📊 ANÁLISIS MOLY MARKET · ${fecha}`);
+      lineasMoly.push('');
+
+      for (const prod_config of PRODUCTOS_MOLY) {
+        console.log(`\n  🌿 ${prod_config.nombre_db}`);
+        lineasMoly.push(`🌿 ${prod_config.nombre_db.toUpperCase()}`);
+
+        const prod = findProd(prod_config.nombre_db);
+
+        // Para cada peso objetivo del producto (ej. Harina de Coco pide 5kg Y 10kg)
+        for (const peso of prod_config.pesos_objetivo) {
+          const kgNum = parseFloat(peso.replace(/[^\d.]/g, '')) || 1;
+
+          // Último precio guardado para este producto+proveedor (comparación siempre en $/kg)
+          let ultimoPrecioKg = null;
+          if (prod?.id) {
+            const { data: ult } = await sb.schema('ops').from('precios_historico')
+              .select('precio_sin_iva').eq('producto_id', prod.id)
+              .eq('proveedor_id', provMap['Moly Market'])
+              .order('fecha_registro', { ascending: false }).limit(1).maybeSingle();
+            ultimoPrecioKg = ult?.precio_sin_iva;
+          }
+
+          const resultados = [];
+          for (const variante of prod_config.variantes) {
+            const datos = await leerPrecioMoly(page, variante.url, peso);
+            if (!datos || datos.precio == null) {
+              console.log(`    ⚠ ${variante.label} (${peso}): no disponible`);
+              continue;
+            }
+            const precioTotal = datos.precio;
+            const precioKg = Math.round((precioTotal / kgNum) * 100) / 100;
+            console.log(`    ${variante.es_principal ? '✓' : '·'} ${variante.label} (${peso}): $${Math.round(precioTotal).toLocaleString('es-AR')} total ($${Math.round(precioKg).toLocaleString('es-AR')}/kg)`);
+            resultados.push({ ...variante, precioTotal, precioKg });
+            await delay(1500);
+          }
+
+          if (!resultados.length) {
+            lineasMoly.push(`  ⚠ Sin datos disponibles para ${peso}`);
+            continue;
+          }
+
+          const principal = resultados.find(r => r.es_principal) || resultados[0];
+
+          if (ultimoPrecioKg && principal.precioKg) {
+            const pct = ((principal.precioKg - ultimoPrecioKg) / ultimoPrecioKg) * 100;
+            if (Math.abs(pct) >= 1) {
+              const sube = pct > 0;
+              lineasMoly.push(`  ${sube ? '📈' : '📉'} ${sube ? 'Subió' : 'Bajó'} ${Math.abs(pct).toFixed(1)}% vs última compra ($${Math.round(ultimoPrecioKg).toLocaleString('es-AR')}/kg)`);
+            } else {
+              lineasMoly.push(`  = Precio estable (${peso})`);
+            }
+          }
+
+          for (const r of resultados) {
+            const tag = r.es_principal ? '✓' : '·';
+            lineasMoly.push(`  ${tag} ${r.label} · ${peso}: $${Math.round(r.precioTotal).toLocaleString('es-AR')} total ($${Math.round(r.precioKg).toLocaleString('es-AR')}/kg)`);
+          }
+
+          // Guardar precio principal ($/kg) en Supabase
+          if (prod?.id && principal.precioKg > 0) {
+            const { error } = await sb.schema('ops').from('precios_historico').insert({
+              producto_id: prod.id,
+              proveedor_id: provMap['Moly Market'],
+              precio_sin_iva: principal.precioKg,
+              fuente: 'agente',
+              ahorro_vs_anterior: ultimoPrecioKg ? ultimoPrecioKg - principal.precioKg : 0,
+            });
+            if (error) console.log(`    ⚠ Error guardando precio: ${error.message}`);
+            else console.log(`    ✓ Precio guardado: $${Math.round(principal.precioKg).toLocaleString('es-AR')}/kg`);
+          }
+        }
+        lineasMoly.push('');
+      }
+
+      // Guardar reporte de Moly Market como alerta separada
+      const reporteMoly = lineasMoly.join('\n');
+      console.log('\n📋 Reporte Moly Market:\n' + reporteMoly);
+      const { error: errAlertaMoly } = await sb.schema('ops').from('alertas').insert({
+        tipo: 'analisis_proveedor',
+        mensaje: reporteMoly,
+        datos: { fecha: new Date().toISOString(), proveedor: 'Moly Market', productos: PRODUCTOS_MOLY.length },
+      });
+      if (errAlertaMoly) console.log('❌ Error guardando alerta Moly Market:', JSON.stringify(errAlertaMoly));
+      else console.log('✓ Reporte Moly Market guardado para Lucas');
+    }
+
   } catch(e) {
     console.log('❌ Error general:', e.message);
     lineas.push(`⚠ Error: ${e.message}`);
@@ -416,7 +655,7 @@ async function monitorear() {
     if (browser) await browser.close().catch(() => {});
   }
 
-  // Guardar reporte
+  // Guardar reporte de El Sembrador
   const reporte = lineas.join('\n');
   console.log('\n📋 Reporte:\n' + reporte);
 

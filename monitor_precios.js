@@ -113,7 +113,6 @@ const PRODUCTOS_MOLY = [
     principal: true,
     pesos_objetivo: ['10 kg'],
     variantes: [
-      { url: 'https://www.molymarket.com.ar/product/almendra-non-pareil-mediana-importada/', label: 'Non Pareil Mediana Importada', es_principal: true },
       { url: 'https://www.molymarket.com.ar/product/almendra-non-pareil-mediana/', label: 'Non Pareil Mediana', es_principal: true },
       { url: 'https://www.molymarket.com.ar/product/almendra-guara-mediana/', label: 'Guara Mediana', es_principal: false },
       { url: 'https://www.molymarket.com.ar/product/almendra-non-pareil-chile/', label: 'Non Pareil Chile', es_principal: false },
@@ -319,9 +318,16 @@ async function leerPrecioMoly(page, url, pesoObjetivo) {
       preview: (document.body?.innerText || '').substring(0, 300).replace(/\n/g, ' '),
       tieneWooForm: !!document.querySelector('form.variations_form, form.cart'),
       tienePrecioGenerico: !!document.querySelector('.woocommerce-Price-amount, .price'),
+      noEncontrada: /página no encontrada|no se ha podido encontrar la página/i.test(document.body?.innerText || ''),
     }));
     console.log(`    → título="${diag.titulo}" wooForm=${diag.tieneWooForm} tienePrecio=${diag.tienePrecioGenerico}`);
     console.log(`    → preview: ${diag.preview}`);
+
+    // URL rota / producto ya no existe en el sitio (404) — no leer ningún precio
+    if (diag.noEncontrada || !diag.tieneWooForm) {
+      console.log(`    ⚠ Página no encontrada (404) o sin formulario de producto en ${url} · se omite`);
+      return { precio: null, sin_stock: false, no_encontrada: true };
+    }
 
     // Chequear sin stock
     const sinStock = await page.evaluate(() => {
@@ -344,19 +350,17 @@ async function leerPrecioMoly(page, url, pesoObjetivo) {
       });
       console.log(`    → opciones del selector: [${opciones.join(' | ')}]`);
 
-      // Buscar la opción cuyo texto matchea el peso objetivo (normalizado, sin espacios, minúscula)
+      // Buscar la opción cuya ETIQUETA DE PESO (antes del paréntesis de precio, si lo hay)
+      // matchea exactamente el peso objetivo. Match exacto, sin substring suelto
+      // (evita que "25 kg" matchee "250 g" por contener "25").
       const valorOpcion = await page.evaluate((pesoObjetivo) => {
         const select = document.querySelector('form.variations_form select, table.variations select, .variations select');
         if (!select) return null;
         const normal = s => (s || '').toLowerCase().replace(/\s+/g, '').replace(',', '.');
         const target = normal(pesoObjetivo);
         for (const opt of select.options) {
-          const txt = normal(opt.textContent);
-          if (txt === target) return opt.value;
-        }
-        // fallback: buscar coincidencia parcial (ej "10kg" dentro del texto)
-        for (const opt of select.options) {
-          if (normal(opt.textContent).includes(target.replace('kg', ''))) return opt.value;
+          const etiqueta = opt.textContent.split('(')[0].trim();
+          if (normal(etiqueta) === target) return opt.value;
         }
         return null;
       }, pesoObjetivo);

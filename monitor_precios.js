@@ -289,8 +289,18 @@ async function leerPrecioProducto(page, url, cantidad_kg) {
 // ═══════════════════════════════════════════════════════
 async function leerPrecioMoly(page, url, pesoObjetivo) {
   try {
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 });
-    await delay(1200);
+    await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
+    await delay(1500);
+
+    // Diagnóstico: título de la página + preview del texto visible
+    const diag = await page.evaluate(() => ({
+      titulo: document.title || '',
+      preview: (document.body?.innerText || '').substring(0, 300).replace(/\n/g, ' '),
+      tieneWooForm: !!document.querySelector('form.variations_form, form.cart'),
+      tienePrecioGenerico: !!document.querySelector('.woocommerce-Price-amount, .price'),
+    }));
+    console.log(`    → título="${diag.titulo}" wooForm=${diag.tieneWooForm} tienePrecio=${diag.tienePrecioGenerico}`);
+    console.log(`    → preview: ${diag.preview}`);
 
     // Chequear sin stock
     const sinStock = await page.evaluate(() => {
@@ -303,8 +313,16 @@ async function leerPrecioMoly(page, url, pesoObjetivo) {
     const tieneSelect = await page.evaluate(() => {
       return !!document.querySelector('form.variations_form select, table.variations select, .variations select');
     });
+    console.log(`    → tieneSelect=${tieneSelect}`);
 
     if (tieneSelect) {
+      // Diagnóstico: listar las opciones reales del selector
+      const opciones = await page.evaluate(() => {
+        const select = document.querySelector('form.variations_form select, table.variations select, .variations select');
+        return select ? Array.from(select.options).map(o => o.textContent.trim()) : [];
+      });
+      console.log(`    → opciones del selector: [${opciones.join(' | ')}]`);
+
       // Buscar la opción cuyo texto matchea el peso objetivo (normalizado, sin espacios, minúscula)
       const valorOpcion = await page.evaluate((pesoObjetivo) => {
         const select = document.querySelector('form.variations_form select, table.variations select, .variations select');
@@ -313,7 +331,7 @@ async function leerPrecioMoly(page, url, pesoObjetivo) {
         const target = normal(pesoObjetivo);
         for (const opt of select.options) {
           const txt = normal(opt.textContent);
-          if (txt === target || txt === target.replace('kg', 'kg')) return opt.value;
+          if (txt === target) return opt.value;
         }
         // fallback: buscar coincidencia parcial (ej "10kg" dentro del texto)
         for (const opt of select.options) {
@@ -334,7 +352,7 @@ async function leerPrecioMoly(page, url, pesoObjetivo) {
     }
 
     // Leer el precio visible. Preferir el precio de variante si quedó seleccionado.
-    const precio = await page.evaluate(() => {
+    const resultado = await page.evaluate(() => {
       const candidatos = [
         '.woocommerce-variation-price .woocommerce-Price-amount',
         '.woocommerce-variation-price .amount',
@@ -343,19 +361,20 @@ async function leerPrecioMoly(page, url, pesoObjetivo) {
         '.summary .price .woocommerce-Price-amount',
         'p.price .woocommerce-Price-amount',
         '.price .woocommerce-Price-amount',
+        '.woocommerce-Price-amount',
       ];
-      let el = null;
+      let el = null, selUsado = null;
       for (const sel of candidatos) {
         el = document.querySelector(sel);
-        if (el) break;
+        if (el) { selUsado = sel; break; }
       }
       const txt = el?.textContent || '';
       const m = txt.match(/([\d.]+)/);
-      if (!m) return null;
-      return parseFloat(m[1].replace(/\./g, ''));
+      return { precio: m ? parseFloat(m[1].replace(/\./g, '')) : null, selUsado, textoCrudo: txt };
     });
+    console.log(`    → selector usado="${resultado.selUsado}" textoCrudo="${resultado.textoCrudo}" precio=${resultado.precio}`);
 
-    return { precio, sin_stock: false };
+    return { precio: resultado.precio, sin_stock: false };
   } catch(e) {
     console.log(`    ⚠ Error en ${url}: ${e.message}`);
     return null;

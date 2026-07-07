@@ -16,11 +16,11 @@ const ejecutar = async (dia) => {
 };
 
 // ── Lunes 8am ──
-cron.schedule('0 11 * * 1', () => ejecutar('Lunes'), { timezone: 'America/Argentina/Mendoza' });
+cron.schedule('0 8 * * 1', () => ejecutar('Lunes'), { timezone: 'America/Argentina/Mendoza' });
 // ── Miércoles 8am ──
-cron.schedule('0 11 * * 3', () => ejecutar('Miércoles'), { timezone: 'America/Argentina/Mendoza' });
+cron.schedule('0 8 * * 3', () => ejecutar('Miércoles'), { timezone: 'America/Argentina/Mendoza' });
 // ── Viernes 8am ──
-cron.schedule('0 11 * * 5', () => ejecutar('Viernes'), { timezone: 'America/Argentina/Mendoza' });
+cron.schedule('0 8 * * 5', () => ejecutar('Viernes'), { timezone: 'America/Argentina/Mendoza' });
 
 // ── Servidor HTTP con CORS ──
 const server = http.createServer(async (req, res) => {
